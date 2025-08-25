@@ -244,3 +244,119 @@
 2025-08-25 19:17:10,880 - werkzeug - INFO - 127.0.0.1 - - [25/Aug/2025 19:17:10] "GET /status HTTP/1.1" 200 -
 2025-08-25 19:17:22,936 - __main__ - DEBUG - Solicitud de estado de cámaras
 2025-08-25 19:17:22,938 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 19:17:22] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:18:21,420 - __main__ - INFO - === INFORMACIÓN DEL SISTEMA ===
+2025-08-25 20:18:21,420 - __main__ - INFO - OS: posix
+2025-08-25 20:18:21,422 - __main__ - INFO - CPU: 50.0%
+2025-08-25 20:18:21,423 - __main__ - INFO - Memoria: 11.1%
+2025-08-25 20:18:21,423 - __main__ - INFO - OpenCV Version: 4.11.0
+2025-08-25 20:18:21,424 - __main__ - INFO -  Ejecutándose en contenedor Docker
+2025-08-25 20:18:21,425 - __main__ - INFO - Capacidades efectivas: CapEff:	000001ffffffffff
+2025-08-25 20:18:21,426 - __main__ - INFO - === INICIALIZANDO CÁMARAS ===
+2025-08-25 20:18:21,427 - __main__ - INFO - === DETECTANDO CÁMARAS CON MÚLTIPLES BACKENDS ===
+2025-08-25 20:18:21,428 - __main__ - INFO - === VERIFICANDO DISPOSITIVOS DEL SISTEMA ===
+2025-08-25 20:18:21,429 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video0
+2025-08-25 20:18:21,430 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video1
+2025-08-25 20:18:21,431 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video2
+2025-08-25 20:18:21,431 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video3
+2025-08-25 20:18:21,432 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video4
+2025-08-25 20:18:21,433 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video5
+2025-08-25 20:18:21,434 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video6
+2025-08-25 20:18:21,435 - __main__ - INFO - ✓ Encontrado dispositivo: /dev/video7
+2025-08-25 20:18:21,747 - __main__ - INFO - === DISPOSITIVOS V4L2 ===
+2025-08-25 20:18:21,748 - __main__ - INFO - V4L2: USB CAMERA: USB CAMERA (usb-vhci_hcd.0-1):
+2025-08-25 20:18:21,748 - __main__ - INFO - V4L2: /dev/video0
+2025-08-25 20:18:21,749 - __main__ - INFO - V4L2: /dev/video1
+2025-08-25 20:18:21,749 - __main__ - INFO - V4L2: /dev/media0
+2025-08-25 20:18:21,750 - __main__ - INFO - V4L2: USB CAMERA: USB CAMERA (usb-vhci_hcd.0-2):
+2025-08-25 20:18:21,751 - __main__ - INFO - V4L2: /dev/video2
+2025-08-25 20:18:21,751 - __main__ - INFO - V4L2: /dev/video3
+2025-08-25 20:18:21,752 - __main__ - INFO - V4L2: /dev/media1
+2025-08-25 20:18:21,753 - __main__ - INFO - V4L2: USB CAMERA: USB CAMERA (usb-vhci_hcd.0-3):
+2025-08-25 20:18:21,753 - __main__ - INFO - V4L2: /dev/video4
+2025-08-25 20:18:21,754 - __main__ - INFO - V4L2: /dev/video5
+2025-08-25 20:18:21,754 - __main__ - INFO - V4L2: /dev/media2
+2025-08-25 20:18:21,755 - __main__ - INFO - V4L2: USB CAMERA: USB CAMERA (usb-vhci_hcd.0-4):
+2025-08-25 20:18:21,755 - __main__ - INFO - V4L2: /dev/video6
+2025-08-25 20:18:21,756 - __main__ - INFO - V4L2: /dev/video7
+2025-08-25 20:18:21,757 - __main__ - INFO - V4L2: /dev/media3
+2025-08-25 20:18:21,758 - __main__ - INFO - Dispositivo /dev/video0 - Permisos: 660
+2025-08-25 20:18:21,758 - __main__ - INFO - Dispositivo /dev/video1 - Permisos: 660
+2025-08-25 20:18:21,760 - __main__ - INFO - Dispositivo /dev/video2 - Permisos: 660
+2025-08-25 20:18:21,761 - __main__ - INFO - Dispositivo /dev/video3 - Permisos: 660
+2025-08-25 20:18:21,762 - __main__ - INFO - Dispositivo /dev/video4 - Permisos: 660
+2025-08-25 20:18:21,763 - __main__ - INFO - Dispositivo /dev/video5 - Permisos: 660
+2025-08-25 20:18:21,764 - __main__ - INFO - Dispositivo /dev/video6 - Permisos: 660
+2025-08-25 20:18:21,764 - __main__ - INFO - Dispositivo /dev/video7 - Permisos: 660
+2025-08-25 20:18:21,765 - __main__ - INFO - Probando cámara 0 con diferentes backends...
+2025-08-25 20:18:21,765 - __main__ - DEBUG -   Backend AUTO para cámara 0...
+2025-08-25 20:18:21,827 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:18:34,422 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:18:44,548 - __main__ - DEBUG -   Backend V4L2 para cámara 0...
+2025-08-25 20:18:44,605 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:18:54,834 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:19:07,311 - __main__ - DEBUG -   Backend GSTREAMER para cámara 0...
+2025-08-25 20:19:07,311 - __main__ - DEBUG -     GSTREAMER: No se puede abrir
+2025-08-25 20:19:07,412 - __main__ - INFO - Probando cámara 2 con diferentes backends...
+2025-08-25 20:19:07,413 - __main__ - DEBUG -   Backend AUTO para cámara 2...
+2025-08-25 20:19:07,545 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:19:17,775 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:19:27,902 - __main__ - DEBUG -   Backend V4L2 para cámara 2...
+2025-08-25 20:19:27,978 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:19:40,526 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:19:50,659 - __main__ - DEBUG -   Backend GSTREAMER para cámara 2...
+2025-08-25 20:19:50,660 - __main__ - DEBUG -     GSTREAMER: No se puede abrir
+2025-08-25 20:19:50,761 - __main__ - INFO - Probando cámara 4 con diferentes backends...
+2025-08-25 20:19:50,762 - __main__ - DEBUG -   Backend AUTO para cámara 4...
+2025-08-25 20:19:50,893 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:20:01,126 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:20:13,645 - __main__ - DEBUG -   Backend V4L2 para cámara 4...
+2025-08-25 20:20:13,703 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:20:23,935 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:20:34,070 - __main__ - DEBUG -   Backend GSTREAMER para cámara 4...
+2025-08-25 20:20:34,072 - __main__ - DEBUG -     GSTREAMER: No se puede abrir
+2025-08-25 20:20:34,174 - __main__ - INFO - Probando cámara 6 con diferentes backends...
+2025-08-25 20:20:34,174 - __main__ - DEBUG -   Backend AUTO para cámara 6...
+2025-08-25 20:20:34,303 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:20:46,905 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:20:57,025 - __main__ - DEBUG -   Backend V4L2 para cámara 6...
+2025-08-25 20:20:57,087 - __main__ - DEBUG -     Intento 1 de lectura...
+2025-08-25 20:21:07,319 - __main__ - DEBUG -     Intento 2 de lectura...
+2025-08-25 20:21:19,780 - __main__ - DEBUG -   Backend GSTREAMER para cámara 6...
+2025-08-25 20:21:19,782 - __main__ - DEBUG -     GSTREAMER: No se puede abrir
+2025-08-25 20:21:19,883 - __main__ - INFO - Cámaras funcionales detectadas: []
+2025-08-25 20:21:19,884 - __main__ - ERROR - ❌ No se detectaron cámaras disponibles
+2025-08-25 20:21:19,885 - __main__ - CRITICAL - ❌ ¡ADVERTENCIA! No se encontraron cámaras disponibles.
+2025-08-25 20:21:19,885 - __main__ - INFO -  Sugerencias para Docker:
+2025-08-25 20:21:19,886 - __main__ - INFO -    - Verifica que docker-compose.yml tiene 'privileged: true'
+2025-08-25 20:21:19,887 - __main__ - INFO -    - Confirma que devices: /dev/video* están mapeados
+2025-08-25 20:21:19,888 - __main__ - INFO -    - Asegúrate de que las cámaras no están siendo usadas por otras apps
+2025-08-25 20:21:19,889 - __main__ - INFO -    - En el host, ejecuta: ls -la /dev/video*
+2025-08-25 20:21:19,899 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://172.18.0.2:5000
+2025-08-25 20:21:19,900 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-08-25 20:21:59,138 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:21:59,140 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:21:59] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:22:09,285 - __main__ - INFO - Página principal cargada - Cámaras disponibles: []
+2025-08-25 20:22:09,312 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:22:09] "GET / HTTP/1.1" 200 -
+2025-08-25 20:22:09,334 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:22:09,335 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:22:09] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:22:11,556 - __main__ - INFO - Página principal cargada - Cámaras disponibles: []
+2025-08-25 20:22:11,557 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:22:11] "GET / HTTP/1.1" 200 -
+2025-08-25 20:22:11,584 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:22:11,586 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:22:11] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:22:42,264 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:22:42,265 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:22:42] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:23:12,445 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:23:12,447 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:23:12] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:23:42,680 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:23:42,682 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:23:42] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:24:12,782 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:24:12,784 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:24:12] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:24:42,891 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:24:42,892 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:24:42] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:25:13,158 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:25:13,159 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:25:13] "GET /status HTTP/1.1" 200 -
+2025-08-25 20:25:43,388 - __main__ - DEBUG - Solicitud de estado de cámaras
+2025-08-25 20:25:43,389 - werkzeug - INFO - 172.18.0.1 - - [25/Aug/2025 20:25:43] "GET /status HTTP/1.1" 200 -

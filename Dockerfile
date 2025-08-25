@@ -1,6 +1,6 @@
 FROM python:3.9-slim
 
-# Install system dependencies for OpenCV and USB cameras
+# Install system dependencies for OpenCV, USB cameras and Tkinter
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libsm6 \
@@ -27,6 +27,9 @@ RUN apt-get update && apt-get install -y \
     udev \
     usbutils \
     curl \
+    python3-tk \
+    x11-apps \
+    xauth \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
