@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Smart Cooler - Extractor de Frames Sincronizados
 Extrae frames de los clips grabados por las 4 cámaras
@@ -23,37 +23,54 @@ class FrameExtractor:
             print(f" Carpeta creada: {self.frames_dir}/")
     
     def find_clip_groups(self):
-        """Encuentra grupos de clips con el mismo timestamp"""
-        clip_files = glob.glob(os.path.join(self.clips_dir, "clip_cam*.mp4"))
+        """Encuentra grupos de clips organizados por producto"""
+        all_groups = {}
         
-        # Extraer timestamps de los nombres de archivo
-        timestamp_groups = {}
-        
-        for clip_path in clip_files:
-            filename = os.path.basename(clip_path)
+        # Buscar en subdirectorios de productos
+        for product_dir in os.listdir(self.clips_dir):
+            product_path = os.path.join(self.clips_dir, product_dir)
             
-            # Buscar patrón: clip_cam{N}_{timestamp}.mp4
-            match = re.match(r'clip_cam(\d+)_(\d{8}_\d{6})\.mp4', filename)
-            if match:
-                cam_id = int(match.group(1))
-                timestamp = match.group(2)
+            if not os.path.isdir(product_path):
+                continue
+            
+            clip_files = glob.glob(os.path.join(product_path, "clip_cam*.mp4"))
+            timestamp_groups = {}
+            
+            for clip_path in clip_files:
+                filename = os.path.basename(clip_path)
                 
-                if timestamp not in timestamp_groups:
-                    timestamp_groups[timestamp] = {}
-                
-                timestamp_groups[timestamp][cam_id] = clip_path
+                # Buscar patrón: clip_cam{N}_{product}_{timestamp}.mp4
+                match = re.match(r'clip_cam(\d+)_(.+)_(\d{8}_\d{6})\.mp4', filename)
+                if match:
+                    cam_id = int(match.group(1))
+                    product_name = match.group(2)
+                    timestamp = match.group(3)
+                    
+                    if timestamp not in timestamp_groups:
+                        timestamp_groups[timestamp] = {'product': product_name, 'clips': {}}
+                    
+                    timestamp_groups[timestamp]['clips'][cam_id] = clip_path
+            
+            # Filtrar solo grupos completos (4 cámaras)
+            for timestamp, group_data in timestamp_groups.items():
+                clips = group_data['clips']
+                if len(clips) == 4 and all(cam_id in clips for cam_id in self.camera_devices):
+                    group_key = f"{group_data['product']}_{timestamp}"
+                    all_groups[group_key] = {
+                        'product': group_data['product'],
+                        'timestamp': timestamp,
+                        'clips': clips
+                    }
         
-        # Filtrar solo grupos completos (4 cámaras)
-        complete_groups = {}
-        for timestamp, clips in timestamp_groups.items():
-            if len(clips) == 4 and all(cam_id in clips for cam_id in self.camera_devices):
-                complete_groups[timestamp] = clips
-        
-        return complete_groups
+        return all_groups
     
-    def extract_frames_from_group(self, timestamp, clip_paths, fps_extract=5, max_frames=None):
+    def extract_frames_from_group(self, group_key, group_data, fps_extract=5, max_frames=None):
         """Extrae frames sincronizados de un grupo de clips"""
-        print(f"\n Procesando grupo: {timestamp}")
+        product = group_data['product']
+        timestamp = group_data['timestamp']
+        clip_paths = group_data['clips']
+        
+        print(f"\n Procesando: {product} - {timestamp}")
         
         # Abrir todos los videos
         caps = {}
@@ -77,10 +94,18 @@ class FrameExtractor:
         
         print(f" Extrayendo cada {frame_interval} frames ({fps_extract} FPS efectivo)")
         
-        # Crear subdirectorio para este grupo
-        group_dir = os.path.join(self.frames_dir, f"group_{timestamp}")
-        if not os.path.exists(group_dir):
-            os.makedirs(group_dir)
+        # Crear estructura de directorios: frames/producto/cam{X}/
+        product_frames_dir = os.path.join(self.frames_dir, product)
+        if not os.path.exists(product_frames_dir):
+            os.makedirs(product_frames_dir)
+        
+        # Crear subdirectorios para cada cámara
+        cam_dirs = {}
+        for cam_id in self.camera_devices:
+            cam_dir = os.path.join(product_frames_dir, f"cam{cam_id}")
+            if not os.path.exists(cam_dir):
+                os.makedirs(cam_dir)
+            cam_dirs[cam_id] = cam_dir
         
         extracted_count = 0
         frame_index = 0
@@ -91,6 +116,9 @@ class FrameExtractor:
             all_success = True
             
             for cam_id in self.camera_devices:
+                if cam_id not in caps:
+                    continue
+                    
                 # Ir al frame específico
                 caps[cam_id].set(cv2.CAP_PROP_POS_FRAMES, frame_index)
                 ret, frame = caps[cam_id].read()
@@ -104,10 +132,10 @@ class FrameExtractor:
             if not all_success:
                 break
             
-            # Guardar frames sincronizados
+            # Guardar frames en directorios de cámara correspondientes
             for cam_id, frame in frames.items():
-                filename = f"frame_{extracted_count:04d}_cam{cam_id}.jpg"
-                filepath = os.path.join(group_dir, filename)
+                filename = f"{timestamp}_frame_{extracted_count:04d}.jpg"
+                filepath = os.path.join(cam_dirs[cam_id], filename)
                 cv2.imwrite(filepath, frame)
             
             extracted_count += 1
@@ -125,20 +153,29 @@ class FrameExtractor:
         for cap in caps.values():
             cap.release()
         
-        print(f"✅ Extraídos {extracted_count} frames sincronizados en: {group_dir}")
+        print(f"✅ Extraídos {extracted_count} frames sincronizados en: {product_frames_dir}")
         return True
     
     def extract_all_clips(self, fps_extract=5, max_frames_per_clip=None):
-        """Extrae frames de todos los grupos de clips"""
+        """Extrae frames de todos los grupos de clips organizados por producto"""
         clip_groups = self.find_clip_groups()
         
         if not clip_groups:
             print("❌ No se encontraron grupos completos de clips (4 cámaras)")
+            print(" Verifica que los clips estén en subdirectorios de productos")
             return
         
-        print(f" Encontrados {len(clip_groups)} grupos de clips completos:")
-        for timestamp in sorted(clip_groups.keys()):
-            print(f"  - {timestamp}")
+        # Organizar por producto
+        products = {}
+        for group_key, group_data in clip_groups.items():
+            product = group_data['product']
+            if product not in products:
+                products[product] = []
+            products[product].append((group_key, group_data))
+        
+        print(f" Encontrados clips de {len(products)} productos:")
+        for product, groups in products.items():
+            print(f"   {product}: {len(groups)} clips")
         
         print(f"\n⚙️  Configuración:")
         print(f"   FPS extracción: {fps_extract}")
@@ -146,10 +183,11 @@ class FrameExtractor:
         
         successful_extractions = 0
         
-        for timestamp in sorted(clip_groups.keys()):
+        for group_key in sorted(clip_groups.keys()):
+            group_data = clip_groups[group_key]
             if self.extract_frames_from_group(
-                timestamp, 
-                clip_groups[timestamp], 
+                group_key, 
+                group_data, 
                 fps_extract, 
                 max_frames_per_clip
             ):
@@ -157,31 +195,59 @@ class FrameExtractor:
         
         print(f"\n Resumen:")
         print(f"   Grupos procesados: {successful_extractions}/{len(clip_groups)}")
-        print(f"   Frames guardados en: {self.frames_dir}/")
+        print(f"   Estructura: {self.frames_dir}/[producto]/cam[X]/")
+        
+        # Mostrar estructura final
+        if os.path.exists(self.frames_dir):
+            print(f"\n Estructura creada:")
+            for product in os.listdir(self.frames_dir):
+                product_path = os.path.join(self.frames_dir, product)
+                if os.path.isdir(product_path):
+                    cam_dirs = [d for d in os.listdir(product_path) if d.startswith('cam')]
+                    print(f"   {product}/ ({len(cam_dirs)} cámaras)")
+                    for cam_dir in sorted(cam_dirs):
+                        cam_path = os.path.join(product_path, cam_dir)
+                        if os.path.isdir(cam_path):
+                            frame_count = len([f for f in os.listdir(cam_path) if f.endswith('.jpg')])
+                            print(f"     {cam_dir}/: {frame_count} frames")
     
     def list_available_clips(self):
-        """Lista los clips disponibles"""
+        """Lista los clips disponibles organizados por producto"""
         clip_groups = self.find_clip_groups()
         
         if not clip_groups:
             print("❌ No se encontraron grupos completos de clips")
             return
         
-        print(" Clips disponibles:")
-        for timestamp in sorted(clip_groups.keys()):
-            print(f"\n {timestamp}:")
-            for cam_id in sorted(clip_groups[timestamp].keys()):
-                clip_path = clip_groups[timestamp][cam_id]
-                # Obtener duración del video
-                cap = cv2.VideoCapture(clip_path)
-                if cap.isOpened():
-                    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    fps = cap.get(cv2.CAP_PROP_FPS)
-                    duration = frame_count / fps if fps > 0 else 0
-                    print(f"     Cam {cam_id}: {duration:.1f}s ({frame_count} frames)")
-                    cap.release()
-                else:
-                    print(f"     Cam {cam_id}: Error al leer")
+        # Organizar por producto
+        products = {}
+        for group_key, group_data in clip_groups.items():
+            product = group_data['product']
+            timestamp = group_data['timestamp']
+            if product not in products:
+                products[product] = []
+            products[product].append((timestamp, group_data))
+        
+        print(" Clips disponibles por producto:")
+        
+        for product in sorted(products.keys()):
+            clips = products[product]
+            print(f"\n {product} ({len(clips)} clips):")
+            
+            for timestamp, group_data in sorted(clips):
+                print(f"   {timestamp}:")
+                for cam_id in sorted(group_data['clips'].keys()):
+                    clip_path = group_data['clips'][cam_id]
+                    # Obtener duración del video
+                    cap = cv2.VideoCapture(clip_path)
+                    if cap.isOpened():
+                        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        duration = frame_count / fps if fps > 0 else 0
+                        print(f"       Cam {cam_id}: {duration:.1f}s ({frame_count} frames)")
+                        cap.release()
+                    else:
+                        print(f"       Cam {cam_id}: Error al leer")
 
 def main():
     parser = argparse.ArgumentParser(description="Extractor de frames para Smart Cooler")
