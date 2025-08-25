@@ -1,0 +1,5 @@
+flask==2.3.3
+psutil==5.9.5
+werkzeug==2.3.7
+numpy<2.0.0
+opencv-python

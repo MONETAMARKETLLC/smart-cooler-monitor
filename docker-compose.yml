@@ -1,0 +1,43 @@
+services:
+  camera-monitor:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: camera_monitor
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - /app/__pycache__
+      - /dev:/dev          
+      - /sys:/sys:ro       
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+      - /dev/video3:/dev/video3
+      - /dev/video4:/dev/video4
+      - /dev/video5:/dev/video5  # Agregar más dispositivos detectados
+      - /dev/video6:/dev/video6
+      - /dev/video7:/dev/video7
+    privileged: true
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OPENCV_VIDEOIO_DEBUG=1
+      - QT_X11_NO_MITSHM=1
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    networks:
+      - camera_network
+
+networks:
+  camera_network:
+    driver: bridge
