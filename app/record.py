@@ -1,7 +1,8 @@
+#!/usr/bin/env python3
 """
 Smart Cooler - Grabador de 4 Cámaras Simultáneas
 Controles:
-- SPACE: Iniciar/Parar grabación
+- SPACE: Seleccionar producto y grabar
 - Q: Salir
 - R: Reiniciar (si alguna cámara falla)
 """
@@ -16,10 +17,13 @@ import numpy as np
 from difflib import get_close_matches
 import tkinter as tk
 from tkinter import messagebox, simpledialog
+import glob
+import re
 
 class ProductManager:
-    def __init__(self, products_file="products.json"):
+    def __init__(self, products_file="products.json", clips_base_dir="clips"):
         self.products_file = products_file
+        self.clips_base_dir = clips_base_dir
         self.products = self.load_products()
     
     def load_products(self):
@@ -42,23 +46,61 @@ class ProductManager:
     
     def add_product(self, product_name):
         """Añade un producto nuevo a la lista"""
-        if product_name not in self.products:
-            self.products.append(product_name)
+        base_product = self.extract_base_product_name(product_name)
+        if base_product not in self.products:
+            self.products.append(base_product)
             self.save_products()
             return True
         return False
+    
+    def extract_base_product_name(self, versioned_name):
+        """Extrae el nombre base del producto sin versión"""
+        # Remover sufijos _v1, _v2, etc.
+        match = re.match(r'^(.+)_v\d+$', versioned_name)
+        if match:
+            return match.group(1)
+        return versioned_name
+    
+    def get_next_version(self, base_product_name):
+        """Obtiene la siguiente versión disponible para un producto"""
+        if not os.path.exists(self.clips_base_dir):
+            return f"{base_product_name}_v1"
+        
+        # Buscar todas las versiones existentes
+        pattern = f"{base_product_name}_v*"
+        existing_dirs = glob.glob(os.path.join(self.clips_base_dir, pattern))
+        
+        if not existing_dirs:
+            return f"{base_product_name}_v1"
+        
+        # Extraer números de versión
+        version_numbers = []
+        for dir_path in existing_dirs:
+            dir_name = os.path.basename(dir_path)
+            match = re.match(f'^{re.escape(base_product_name)}_v(\\d+)$', dir_name)
+            if match:
+                version_numbers.append(int(match.group(1)))
+        
+        if not version_numbers:
+            return f"{base_product_name}_v1"
+        
+        next_version = max(version_numbers) + 1
+        return f"{base_product_name}_v{next_version}"
     
     def find_similar_products(self, query, max_matches=5):
         """Encuentra productos similares usando fuzzy matching"""
         if not query:
             return []
         
+        # Extraer nombre base si tiene versión
+        base_query = self.extract_base_product_name(query)
+        
         # Buscar coincidencias exactas primero
-        exact_matches = [p for p in self.products if query.lower() in p.lower()]
+        exact_matches = [p for p in self.products if base_query.lower() in p.lower()]
         
         # Buscar coincidencias aproximadas
         fuzzy_matches = get_close_matches(
-            query.lower(), 
+            base_query.lower(), 
             [p.lower() for p in self.products], 
             n=max_matches, 
             cutoff=0.6
@@ -81,7 +123,7 @@ class ProductManager:
         return all_matches[:max_matches]
     
     def get_product_input(self):
-        """Obtiene el nombre del producto con validación y sugerencias"""
+        """Obtiene el nombre del producto con validación y versionado automático"""
         root = tk.Tk()
         root.withdraw()  # Ocultar ventana principal
         
@@ -105,57 +147,109 @@ class ProductManager:
             
             # Normalizar nombre (reemplazar espacios con guiones bajos)
             normalized_name = product_name.lower().replace(' ', '_')
+            base_product = self.extract_base_product_name(normalized_name)
             
-            # Verificar si el producto ya existe exactamente
-            if normalized_name in [p.lower() for p in self.products]:
-                root.destroy()
-                return normalized_name
-            
-            # Buscar productos similares
-            similar = self.find_similar_products(normalized_name)
-            
-            if similar:
-                # Mostrar sugerencias
-                suggestions_text = "\n".join([f"• {p}" for p in similar])
+            # Verificar si el producto base ya existe
+            if base_product in [p.lower() for p in self.products]:
+                # Producto existe, determinar versión
+                versioned_name = self.get_next_version(base_product)
                 
-                response = messagebox.askyesnocancel(
-                    "Productos similares encontrados",
-                    f"¿Te refieres a alguno de estos productos?\n\n{suggestions_text}\n\n" +
-                    f"SÍ = Mostrar opciones\n" +
-                    f"NO = Usar '{normalized_name}' como producto nuevo\n" +
-                    f"CANCELAR = Escribir otro nombre"
-                )
+                # Mostrar información de versionado
+                existing_versions = self.get_existing_versions(base_product)
+                version_info = f"Versiones existentes: {', '.join(existing_versions)}" if existing_versions else "Primera grabación"
                 
-                if response is True:  # Sí - elegir de sugerencias
-                    choice = self.choose_from_suggestions(similar, normalized_name)
-                    if choice:
-                        root.destroy()
-                        return choice
-                    continue
-                    
-                elif response is False:  # No - producto nuevo
-                    self.add_product(normalized_name)
-                    print(f"✅ Producto nuevo añadido: {normalized_name}")
-                    root.destroy()
-                    return normalized_name
-                    
-                # None - Cancelar, continúa el loop
-                
-            else:
-                # No hay productos similares, confirmar nuevo producto
                 confirm = messagebox.askyesno(
-                    "Producto nuevo",
-                    f"'{normalized_name}' será un producto nuevo.\n\n¿Continuar?"
+                    "Producto existente",
+                    f"Producto: {base_product}\n" +
+                    f"{version_info}\n\n" +
+                    f"Nueva versión será: {versioned_name}\n\n" +
+                    f"¿Continuar?"
                 )
                 
                 if confirm:
-                    self.add_product(normalized_name)
-                    print(f"✅ Producto nuevo añadido: {normalized_name}")
                     root.destroy()
-                    return normalized_name
+                    return versioned_name
+                # Si no confirma, continúa el loop para ingresar otro nombre
+                
+            else:
+                # Buscar productos similares
+                similar = self.find_similar_products(base_product)
+                
+                if similar:
+                    # Mostrar sugerencias
+                    suggestions_text = "\n".join([f"• {p}" for p in similar])
+                    
+                    response = messagebox.askyesnocancel(
+                        "Productos similares encontrados",
+                        f"¿Te refieres a alguno de estos productos?\n\n{suggestions_text}\n\n" +
+                        f"SÍ = Mostrar opciones\n" +
+                        f"NO = Usar '{base_product}' como producto nuevo\n" +
+                        f"CANCELAR = Escribir otro nombre"
+                    )
+                    
+                    if response is True:  # Sí - elegir de sugerencias
+                        choice = self.choose_from_suggestions(similar, base_product)
+                        if choice:
+                            # Generar versión para el producto elegido
+                            versioned_choice = self.get_next_version(choice)
+                            existing_versions = self.get_existing_versions(choice)
+                            version_info = f"Versiones existentes: {', '.join(existing_versions)}" if existing_versions else "Primera grabación"
+                            
+                            confirm = messagebox.askyesno(
+                                "Confirmación de versión",
+                                f"Producto seleccionado: {choice}\n" +
+                                f"{version_info}\n\n" +
+                                f"Nueva versión será: {versioned_choice}\n\n" +
+                                f"¿Continuar?"
+                            )
+                            
+                            if confirm:
+                                root.destroy()
+                                return versioned_choice
+                        continue
+                        
+                    elif response is False:  # No - producto nuevo
+                        new_versioned_name = f"{base_product}_v1"
+                        self.add_product(base_product)
+                        print(f"✅ Producto nuevo añadido: {base_product}")
+                        root.destroy()
+                        return new_versioned_name
+                        
+                    # None - Cancelar, continúa el loop
+                    
+                else:
+                    # No hay productos similares, confirmar nuevo producto
+                    confirm = messagebox.askyesno(
+                        "Producto nuevo",
+                        f"'{base_product}' será un producto nuevo.\n\n¿Continuar?"
+                    )
+                    
+                    if confirm:
+                        new_versioned_name = f"{base_product}_v1"
+                        self.add_product(base_product)
+                        print(f"✅ Producto nuevo añadido: {base_product}")
+                        root.destroy()
+                        return new_versioned_name
         
         root.destroy()
         return None
+    
+    def get_existing_versions(self, base_product):
+        """Obtiene lista de versiones existentes de un producto"""
+        if not os.path.exists(self.clips_base_dir):
+            return []
+        
+        pattern = f"{base_product}_v*"
+        existing_dirs = glob.glob(os.path.join(self.clips_base_dir, pattern))
+        
+        versions = []
+        for dir_path in existing_dirs:
+            dir_name = os.path.basename(dir_path)
+            match = re.match(f'^{re.escape(base_product)}_v(\\d+)$', dir_name)
+            if match:
+                versions.append(f"v{match.group(1)}")
+        
+        return sorted(versions, key=lambda x: int(x[1:]))  # Ordenar por número
     
     def choose_from_suggestions(self, suggestions, original_query):
         """Permite elegir de una lista de sugerencias"""
@@ -176,12 +270,17 @@ class ProductManager:
         frame.pack(pady=10, padx=20, fill='both', expand=True)
         
         for product in suggestions:
+            # Mostrar versiones existentes junto al nombre
+            existing_versions = self.get_existing_versions(product)
+            version_text = f" ({', '.join(existing_versions)})" if existing_versions else " (nuevo)"
+            display_text = f"{product}{version_text}"
+            
             tk.Radiobutton(
                 frame, 
-                text=product, 
+                text=display_text, 
                 variable=selection_var, 
                 value=product,
-                font=("Arial", 11)
+                font=("Arial", 10)
             ).pack(anchor='w', pady=2)
         
         def on_select():
@@ -226,14 +325,14 @@ class MultiCameraRecorder:
         self.height = 480
         self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         
-        # Gestor de productos
-        self.product_manager = ProductManager()
-        
         # Crear carpeta base para clips si no existe
         self.base_clips_dir = "clips"
         if not os.path.exists(self.base_clips_dir):
             os.makedirs(self.base_clips_dir)
-            print(f" Carpeta creada: {self.base_clips_dir}/")
+            print(f"📁 Carpeta creada: {self.base_clips_dir}/")
+        
+        # Gestor de productos con versionado
+        self.product_manager = ProductManager(clips_base_dir=self.base_clips_dir)
     
     def initialize_single_camera(self, device_id, timeout=10):
         """Inicializa una sola cámara con timeout"""
@@ -243,7 +342,7 @@ class MultiCameraRecorder:
             raise TimeoutError(f"Timeout inicializando cámara {device_id}")
         
         try:
-            print(f" Inicializando cámara /dev/video{device_id}...")
+            print(f"📷 Inicializando cámara /dev/video{device_id}...")
             
             # Configurar timeout
             signal.signal(signal.SIGALRM, timeout_handler)
@@ -288,7 +387,7 @@ class MultiCameraRecorder:
 
     def initialize_cameras(self):
         """Inicializa todas las cámaras con timeouts"""
-        print(" Inicializando cámaras...")
+        print("🔍 Inicializando cámaras...")
         
         for device_id in self.camera_devices:
             cap, frame = self.initialize_single_camera(device_id)
@@ -304,7 +403,7 @@ class MultiCameraRecorder:
             print("❌ No se inicializó ninguna cámara")
             return False
             
-        print(f" {len(self.cameras)} cámaras inicializadas")
+        print(f"🎉 {len(self.cameras)} cámaras inicializadas")
         return True
     
     def capture_thread(self, device_id):
@@ -330,42 +429,42 @@ class MultiCameraRecorder:
             thread.daemon = True
             thread.start()
             self.threads.append(thread)
-            print(f" Hilo iniciado para cámara {device_id}")
+            print(f"🎬 Hilo iniciado para cámara {device_id}")
     
     def start_recording(self):
-        """Inicia la grabación después de obtener el nombre del producto"""
+        """Inicia la grabación después de obtener el nombre del producto versionado"""
         if self.recording:
             return
             
-        # Obtener nombre del producto
-        print("️  Seleccionando producto...")
-        product_name = self.product_manager.get_product_input()
+        # Obtener nombre del producto con versionado automático
+        print("🏷️  Seleccionando producto...")
+        versioned_product_name = self.product_manager.get_product_input()
         
-        if product_name is None:
+        if versioned_product_name is None:
             print("❌ Grabación cancelada por el usuario")
             return
         
-        self.current_product = product_name
+        self.current_product = versioned_product_name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Crear directorio del producto si no existe
-        product_dir = os.path.join(self.base_clips_dir, product_name)
+        # Crear directorio del producto versionado si no existe
+        product_dir = os.path.join(self.base_clips_dir, versioned_product_name)
         if not os.path.exists(product_dir):
             os.makedirs(product_dir)
-            print(f" Carpeta del producto creada: {product_dir}/")
+            print(f"📁 Carpeta del producto creada: {product_dir}/")
         
         self.writers = {}
         
-        print(f"\n GRABANDO: {product_name} - {timestamp}")
+        print(f"\n🔴 GRABANDO: {versioned_product_name} - {timestamp}")
         
         for device_id in self.cameras.keys():
-            filename = f"clip_cam{device_id}_{product_name}_{timestamp}.mp4"
+            filename = f"clip_cam{device_id}_{versioned_product_name}_{timestamp}.mp4"
             filepath = os.path.join(product_dir, filename)
             writer = cv2.VideoWriter(filepath, self.fourcc, self.fps, (self.width, self.height))
             
             if writer.isOpened():
                 self.writers[device_id] = writer
-                print(f" Grabando: {filename}")
+                print(f"📹 Grabando: {filename}")
             else:
                 print(f"❌ Error creando writer para cámara {device_id}")
         
@@ -384,10 +483,11 @@ class MultiCameraRecorder:
         # Cerrar todos los writers
         for device_id, writer in self.writers.items():
             writer.release()
-            print(f" Guardado: clip_cam{device_id} ({duration:.1f}s)")
+            print(f"💾 Guardado: clip_cam{device_id} ({duration:.1f}s)")
         
         self.writers = {}
-        print(f"⏹️  Grabación terminada - Duración: {duration:.1f}s\n")
+        print(f"⏹️  Grabación terminada - Duración: {duration:.1f}s")
+        print(f"📂 Clips guardados en: clips/{self.current_product}/\n")
     
     def create_display_grid(self):
         """Crea la vista en grid de las 4 cámaras"""
@@ -416,8 +516,8 @@ class MultiCameraRecorder:
                 
                 if self.recording and self.record_start_time:
                     duration = time.time() - self.record_start_time
-                    cv2.putText(frame, f'{duration:.1f}s', (10, 60), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    cv2.putText(frame, f'{duration:.1f}s', (10, 90), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                 
                 # Redimensionar para display
                 frame_resized = cv2.resize(frame, (320, 240))
@@ -446,27 +546,31 @@ class MultiCameraRecorder:
             
         self.start_capture_threads()
         
-        print("\n" + "="*50)
-        print(" SMART COOLER - GRABADOR DE 4 CÁMARAS")
-        print("="*50)
+        print("\n" + "="*60)
+        print("🎬 SMART COOLER - GRABADOR DE 4 CÁMARAS CON VERSIONADO")
+        print("="*60)
         print("Controles:")
-        print("  SPACE - Iniciar/Parar grabación")
+        print("  SPACE - Seleccionar producto y grabar")
+        print("  SPACE - Parar grabación (cuando está grabando)")
         print("  Q     - Salir")
         print("  R     - Reiniciar cámaras")
-        print("="*50)
-        print(f" Clips se guardan en: {self.base_clips_dir}/")
-        print(" LISTO - Presiona SPACE para grabar\n")
+        print("="*60)
+        print(f"📁 Clips se guardan en: {self.base_clips_dir}/[producto_vN]/")
+        if self.product_manager.products:
+            print(f"🏷️  Productos disponibles: {len(self.product_manager.products)}")
+        print("🔄 Versionado automático: producto_v1, producto_v2, etc.")
+        print("🟢 LISTO - Presiona SPACE para seleccionar producto y grabar\n")
         
         try:
             while self.running:
                 grid = self.create_display_grid()
                 if grid is not None:
-                    cv2.imshow('Smart Cooler - 4 Cameras', grid)
+                    cv2.imshow('Smart Cooler - 4 Cameras (Versionado)', grid)
                 
                 key = cv2.waitKey(1) & 0xFF
                 
                 if key == ord('q'):
-                    print("\n Saliendo...")
+                    print("\n👋 Saliendo...")
                     break
                 elif key == ord(' '):  # SPACE
                     if self.recording:
@@ -474,7 +578,7 @@ class MultiCameraRecorder:
                     else:
                         self.start_recording()
                 elif key == ord('r'):
-                    print("\n Reiniciando cámaras...")
+                    print("\n🔄 Reiniciando cámaras...")
                     self.cleanup_cameras()
                     time.sleep(1)
                     self.initialize_cameras()
@@ -495,7 +599,7 @@ class MultiCameraRecorder:
     
     def cleanup(self):
         """Limpia todos los recursos"""
-        print("\n粒 Limpiando recursos...")
+        print("\n🧹 Limpiando recursos...")
         
         self.running = False
         
