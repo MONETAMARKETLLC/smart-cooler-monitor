@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Smart Cooler - Grabador de 4 Cámaras Simultáneas
-Controles:
-- SPACE: Seleccionar producto y grabar
-- Q: Salir
-- R: Reiniciar (si alguna cámara falla)
+Smart Cooler - Multi-Camera Recorder with Auto-Detection
+Refactored version following Python best practices
+
+Controls:
+- SPACE: Select product and record
+- Q: Exit  
+- R: Restart cameras
+- D: Force camera detection
+- F: Toggle fullscreen
+- +/-: Resize window
 """
 
 import cv2
@@ -12,72 +17,133 @@ import threading
 import time
 import os
 import json
+import logging
+import signal
+import subprocess
+import glob
+import re
 from datetime import datetime
-import numpy as np
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass
+from pathlib import Path
 from difflib import get_close_matches
 import tkinter as tk
 from tkinter import messagebox, simpledialog
-import glob
-import re
+import numpy as np
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('smart_cooler.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CameraInfo:
+    """Camera information data class"""
+    device_id: int
+    name: str
+    backend: Optional[str] = None
+    width: int = 0
+    height: int = 0
+    fps: float = 0.0
+    fourcc: float = 0.0
+
+
+@dataclass
+class VideoConfig:
+    """Video configuration settings"""
+    fps: int = 60
+    width: int = 800
+    height: int = 600
+    fourcc: int = cv2.VideoWriter_fourcc(*'mp4v')
+
+
+@dataclass
+class WindowConfig:
+    """Window configuration settings"""
+    width: int = 800
+    height: int = 600
+    min_width: int = 400
+    min_height: int = 300
+    max_width: int = 1920
+    max_height: int = 1080
+
+
+class CameraError(Exception):
+    """Custom exception for camera-related errors"""
+    pass
+
 
 class ProductManager:
-    def __init__(self, products_file="products.json", clips_base_dir="clips"):
-        self.products_file = products_file
-        self.clips_base_dir = clips_base_dir
-        self.products = self.load_products()
+    """Manages product database and versioning"""
     
-    def load_products(self):
-        """Carga la lista de productos del archivo JSON"""
-        if os.path.exists(self.products_file):
-            try:
-                with open(self.products_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except:
-                return []
-        return []
+    def __init__(self, products_file: str = "products.json", clips_base_dir: str = "clips"):
+        self.products_file = Path(products_file)
+        self.clips_base_dir = Path(clips_base_dir)
+        self.products = self._load_products()
+        self._ensure_clips_directory()
     
-    def save_products(self):
-        """Guarda la lista de productos al archivo JSON"""
+    def _load_products(self) -> List[str]:
+        """Load products from JSON file"""
+        if not self.products_file.exists():
+            return []
+        
+        try:
+            with open(self.products_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Error loading products file: {e}")
+            return []
+    
+    def _save_products(self) -> None:
+        """Save products to JSON file"""
         try:
             with open(self.products_file, 'w', encoding='utf-8') as f:
                 json.dump(sorted(list(set(self.products))), f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"⚠️  Error guardando productos: {e}")
+        except IOError as e:
+            logger.error(f"Error saving products: {e}")
     
-    def add_product(self, product_name):
-        """Añade un producto nuevo a la lista"""
-        base_product = self.extract_base_product_name(product_name)
+    def _ensure_clips_directory(self) -> None:
+        """Ensure clips directory exists"""
+        self.clips_base_dir.mkdir(exist_ok=True)
+        logger.info(f"Clips directory ready: {self.clips_base_dir}")
+    
+    def add_product(self, product_name: str) -> bool:
+        """Add a new product to the list"""
+        base_product = self._extract_base_product_name(product_name)
         if base_product not in self.products:
             self.products.append(base_product)
-            self.save_products()
+            self._save_products()
+            logger.info(f"New product added: {base_product}")
             return True
         return False
     
-    def extract_base_product_name(self, versioned_name):
-        """Extrae el nombre base del producto sin versión"""
-        # Remover sufijos _v1, _v2, etc.
+    def _extract_base_product_name(self, versioned_name: str) -> str:
+        """Extract base product name without version suffix"""
         match = re.match(r'^(.+)_v\d+$', versioned_name)
-        if match:
-            return match.group(1)
-        return versioned_name
+        return match.group(1) if match else versioned_name
     
-    def get_next_version(self, base_product_name):
-        """Obtiene la siguiente versión disponible para un producto"""
-        if not os.path.exists(self.clips_base_dir):
+    def get_next_version(self, base_product_name: str) -> str:
+        """Get next available version for a product"""
+        if not self.clips_base_dir.exists():
             return f"{base_product_name}_v1"
         
-        # Buscar todas las versiones existentes
         pattern = f"{base_product_name}_v*"
-        existing_dirs = glob.glob(os.path.join(self.clips_base_dir, pattern))
+        existing_dirs = list(self.clips_base_dir.glob(pattern))
         
         if not existing_dirs:
             return f"{base_product_name}_v1"
         
-        # Extraer números de versión
         version_numbers = []
         for dir_path in existing_dirs:
-            dir_name = os.path.basename(dir_path)
-            match = re.match(f'^{re.escape(base_product_name)}_v(\\d+)$', dir_name)
+            match = re.match(f'^{re.escape(base_product_name)}_v(\\d+)$', dir_path.name)
             if match:
                 version_numbers.append(int(match.group(1)))
         
@@ -87,26 +153,25 @@ class ProductManager:
         next_version = max(version_numbers) + 1
         return f"{base_product_name}_v{next_version}"
     
-    def find_similar_products(self, query, max_matches=5):
-        """Encuentra productos similares usando fuzzy matching"""
+    def find_similar_products(self, query: str, max_matches: int = 5) -> List[str]:
+        """Find similar products using fuzzy matching"""
         if not query:
             return []
         
-        # Extraer nombre base si tiene versión
-        base_query = self.extract_base_product_name(query)
+        base_query = self._extract_base_product_name(query)
         
-        # Buscar coincidencias exactas primero
+        # Exact matches first
         exact_matches = [p for p in self.products if base_query.lower() in p.lower()]
         
-        # Buscar coincidencias aproximadas
+        # Fuzzy matches
         fuzzy_matches = get_close_matches(
-            base_query.lower(), 
-            [p.lower() for p in self.products], 
-            n=max_matches, 
+            base_query.lower(),
+            [p.lower() for p in self.products],
+            n=max_matches,
             cutoff=0.6
         )
         
-        # Mapear de vuelta a nombres originales
+        # Map back to original names
         fuzzy_original = []
         for fuzzy in fuzzy_matches:
             for product in self.products:
@@ -114,7 +179,7 @@ class ProductManager:
                     fuzzy_original.append(product)
                     break
         
-        # Combinar y eliminar duplicados manteniendo orden
+        # Combine and remove duplicates
         all_matches = []
         for match in exact_matches + fuzzy_original:
             if match not in all_matches:
@@ -122,163 +187,144 @@ class ProductManager:
         
         return all_matches[:max_matches]
     
-    def get_product_input(self):
-        """Obtiene el nombre del producto con validación y versionado automático"""
-        root = tk.Tk()
-        root.withdraw()  # Ocultar ventana principal
-        
-        while True:
-            # Pedir nombre del producto
-            product_name = simpledialog.askstring(
-                "Smart Cooler - Producto",
-                "Nombre del producto a grabar:",
-                initialvalue=""
-            )
-            
-            if product_name is None:  # Usuario canceló
-                root.destroy()
-                return None
-            
-            product_name = product_name.strip()
-            
-            if not product_name:
-                messagebox.showwarning("Advertencia", "Por favor ingresa un nombre de producto")
-                continue
-            
-            # Normalizar nombre (reemplazar espacios con guiones bajos)
-            normalized_name = product_name.lower().replace(' ', '_')
-            base_product = self.extract_base_product_name(normalized_name)
-            
-            # Verificar si el producto base ya existe
-            if base_product in [p.lower() for p in self.products]:
-                # Producto existe, determinar versión
-                versioned_name = self.get_next_version(base_product)
-                
-                # Mostrar información de versionado
-                existing_versions = self.get_existing_versions(base_product)
-                version_info = f"Versiones existentes: {', '.join(existing_versions)}" if existing_versions else "Primera grabación"
-                
-                confirm = messagebox.askyesno(
-                    "Producto existente",
-                    f"Producto: {base_product}\n" +
-                    f"{version_info}\n\n" +
-                    f"Nueva versión será: {versioned_name}\n\n" +
-                    f"¿Continuar?"
-                )
-                
-                if confirm:
-                    root.destroy()
-                    return versioned_name
-                # Si no confirma, continúa el loop para ingresar otro nombre
-                
-            else:
-                # Buscar productos similares
-                similar = self.find_similar_products(base_product)
-                
-                if similar:
-                    # Mostrar sugerencias
-                    suggestions_text = "\n".join([f"• {p}" for p in similar])
-                    
-                    response = messagebox.askyesnocancel(
-                        "Productos similares encontrados",
-                        f"¿Te refieres a alguno de estos productos?\n\n{suggestions_text}\n\n" +
-                        f"SÍ = Mostrar opciones\n" +
-                        f"NO = Usar '{base_product}' como producto nuevo\n" +
-                        f"CANCELAR = Escribir otro nombre"
-                    )
-                    
-                    if response is True:  # Sí - elegir de sugerencias
-                        choice = self.choose_from_suggestions(similar, base_product)
-                        if choice:
-                            # Generar versión para el producto elegido
-                            versioned_choice = self.get_next_version(choice)
-                            existing_versions = self.get_existing_versions(choice)
-                            version_info = f"Versiones existentes: {', '.join(existing_versions)}" if existing_versions else "Primera grabación"
-                            
-                            confirm = messagebox.askyesno(
-                                "Confirmación de versión",
-                                f"Producto seleccionado: {choice}\n" +
-                                f"{version_info}\n\n" +
-                                f"Nueva versión será: {versioned_choice}\n\n" +
-                                f"¿Continuar?"
-                            )
-                            
-                            if confirm:
-                                root.destroy()
-                                return versioned_choice
-                        continue
-                        
-                    elif response is False:  # No - producto nuevo
-                        new_versioned_name = f"{base_product}_v1"
-                        self.add_product(base_product)
-                        print(f"✅ Producto nuevo añadido: {base_product}")
-                        root.destroy()
-                        return new_versioned_name
-                        
-                    # None - Cancelar, continúa el loop
-                    
-                else:
-                    # No hay productos similares, confirmar nuevo producto
-                    confirm = messagebox.askyesno(
-                        "Producto nuevo",
-                        f"'{base_product}' será un producto nuevo.\n\n¿Continuar?"
-                    )
-                    
-                    if confirm:
-                        new_versioned_name = f"{base_product}_v1"
-                        self.add_product(base_product)
-                        print(f"✅ Producto nuevo añadido: {base_product}")
-                        root.destroy()
-                        return new_versioned_name
-        
-        root.destroy()
-        return None
-    
-    def get_existing_versions(self, base_product):
-        """Obtiene lista de versiones existentes de un producto"""
-        if not os.path.exists(self.clips_base_dir):
+    def get_existing_versions(self, base_product: str) -> List[str]:
+        """Get list of existing versions for a product"""
+        if not self.clips_base_dir.exists():
             return []
         
         pattern = f"{base_product}_v*"
-        existing_dirs = glob.glob(os.path.join(self.clips_base_dir, pattern))
+        existing_dirs = list(self.clips_base_dir.glob(pattern))
         
         versions = []
         for dir_path in existing_dirs:
-            dir_name = os.path.basename(dir_path)
-            match = re.match(f'^{re.escape(base_product)}_v(\\d+)$', dir_name)
+            match = re.match(f'^{re.escape(base_product)}_v(\\d+)$', dir_path.name)
             if match:
                 versions.append(f"v{match.group(1)}")
         
-        return sorted(versions, key=lambda x: int(x[1:]))  # Ordenar por número
+        return sorted(versions, key=lambda x: int(x[1:]))
     
-    def choose_from_suggestions(self, suggestions, original_query):
-        """Permite elegir de una lista de sugerencias"""
+    def get_product_input(self) -> Optional[str]:
+        """Get product name with validation and automatic versioning"""
         root = tk.Tk()
-        root.title("Seleccionar Producto")
+        root.withdraw()
+        
+        try:
+            while True:
+                product_name = simpledialog.askstring(
+                    "Smart Cooler - Product",
+                    "Product name to record:",
+                    initialvalue=""
+                )
+                
+                if product_name is None:
+                    return None
+                
+                product_name = product_name.strip()
+                if not product_name:
+                    messagebox.showwarning("Warning", "Please enter a product name")
+                    continue
+                
+                normalized_name = product_name.lower().replace(' ', '_')
+                base_product = self._extract_base_product_name(normalized_name)
+                
+                if base_product in [p.lower() for p in self.products]:
+                    return self._handle_existing_product(base_product)
+                else:
+                    return self._handle_new_product(base_product, normalized_name)
+        
+        finally:
+            root.destroy()
+    
+    def _handle_existing_product(self, base_product: str) -> Optional[str]:
+        """Handle existing product logic"""
+        versioned_name = self.get_next_version(base_product)
+        existing_versions = self.get_existing_versions(base_product)
+        
+        version_info = f"Existing versions: {', '.join(existing_versions)}" if existing_versions else "First recording"
+        
+        confirm = messagebox.askyesno(
+            "Existing Product",
+            f"Product: {base_product}\n{version_info}\n\n"
+            f"New version will be: {versioned_name}\n\nContinue?"
+        )
+        
+        return versioned_name if confirm else None
+    
+    def _handle_new_product(self, base_product: str, normalized_name: str) -> Optional[str]:
+        """Handle new product logic"""
+        similar = self.find_similar_products(base_product)
+        
+        if similar:
+            return self._handle_similar_products(similar, base_product)
+        else:
+            confirm = messagebox.askyesno(
+                "New Product",
+                f"'{base_product}' will be a new product.\n\nContinue?"
+            )
+            
+            if confirm:
+                new_versioned_name = f"{base_product}_v1"
+                self.add_product(base_product)
+                return new_versioned_name
+        
+        return None
+    
+    def _handle_similar_products(self, similar: List[str], base_product: str) -> Optional[str]:
+        """Handle similar products logic"""
+        suggestions_text = "\n".join([f"• {p}" for p in similar])
+        
+        response = messagebox.askyesnocancel(
+            "Similar Products Found",
+            f"Do you mean one of these products?\n\n{suggestions_text}\n\n"
+            f"YES = Show options\nNO = Use '{base_product}' as new product\nCANCEL = Enter different name"
+        )
+        
+        if response is True:
+            choice = self._choose_from_suggestions(similar, base_product)
+            if choice:
+                versioned_choice = self.get_next_version(choice)
+                existing_versions = self.get_existing_versions(choice)
+                version_info = f"Existing versions: {', '.join(existing_versions)}" if existing_versions else "First recording"
+                
+                confirm = messagebox.askyesno(
+                    "Version Confirmation",
+                    f"Selected product: {choice}\n{version_info}\n\n"
+                    f"New version will be: {versioned_choice}\n\nContinue?"
+                )
+                
+                return versioned_choice if confirm else None
+        elif response is False:
+            new_versioned_name = f"{base_product}_v1"
+            self.add_product(base_product)
+            return new_versioned_name
+        
+        return None
+    
+    def _choose_from_suggestions(self, suggestions: List[str], original_query: str) -> Optional[str]:
+        """Allow choosing from a list of suggestions"""
+        root = tk.Tk()
+        root.title("Select Product")
         root.geometry("400x300")
         
         selected_product = None
         
-        tk.Label(root, text=f"Productos similares a: '{original_query}'", 
+        tk.Label(root, text=f"Products similar to: '{original_query}'",
                 font=("Arial", 12, "bold")).pack(pady=10)
         
-        # Variable para almacenar selección
         selection_var = tk.StringVar()
         
-        # Frame para lista de productos
         frame = tk.Frame(root)
         frame.pack(pady=10, padx=20, fill='both', expand=True)
         
         for product in suggestions:
-            # Mostrar versiones existentes junto al nombre
             existing_versions = self.get_existing_versions(product)
-            version_text = f" ({', '.join(existing_versions)})" if existing_versions else " (nuevo)"
+            version_text = f" ({', '.join(existing_versions)})" if existing_versions else " (new)"
             display_text = f"{product}{version_text}"
             
             tk.Radiobutton(
-                frame, 
-                text=display_text, 
-                variable=selection_var, 
+                frame,
+                text=display_text,
+                variable=selection_var,
                 value=product,
                 font=("Arial", 10)
             ).pack(anchor='w', pady=2)
@@ -293,672 +339,820 @@ class ProductManager:
             selected_product = None
             root.quit()
         
-        # Botones
         btn_frame = tk.Frame(root)
         btn_frame.pack(pady=10)
         
-        tk.Button(btn_frame, text="Seleccionar", command=on_select, 
+        tk.Button(btn_frame, text="Select", command=on_select,
                  bg="#4CAF50", fg="white", font=("Arial", 10, "bold")).pack(side='left', padx=5)
-        tk.Button(btn_frame, text="Cancelar", command=on_cancel, 
+        tk.Button(btn_frame, text="Cancel", command=on_cancel,
                  bg="#f44336", fg="white", font=("Arial", 10, "bold")).pack(side='left', padx=5)
         
-        root.mainloop()
-        root.destroy()
-        
-        return selected_product
-
-class MultiCameraRecorder:
-    def __init__(self):
-        # Las cámaras se detectarán automáticamente
-        self.camera_devices = []
-        self.cameras = {}
-        self.writers = {}
-        self.frames = {}
-        self.recording = False
-        self.running = True
-        self.record_start_time = None
-        self.current_product = None
-        
-        # Configuración de video
-        self.fps = 60
-        self.width = 800
-        self.height = 600
-        self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        
-        # FIXED: Variables para manejo dinámico de ventana
-        self.window_width = 800
-        self.window_height = 600
-        self.min_window_width = 400
-        self.min_window_height = 300
-        self.max_window_width = 1920
-        self.max_window_height = 1080
-        
-        # FIXED: Variable para trackear cambios de tamaño
-        self.last_known_size = (800, 600)
-        self.size_check_interval = 0.1  # Cada 100ms
-        self.last_size_check = 0
-        
-        # Crear carpeta base para clips si no existe
-        self.base_clips_dir = "clips"
-        if not os.path.exists(self.base_clips_dir):
-            os.makedirs(self.base_clips_dir)
-            print(f"📁 Carpeta creada: {self.base_clips_dir}/")
-        
-        # Gestor de productos con versionado
-        self.product_manager = ProductManager(clips_base_dir=self.base_clips_dir)
-    
-    def detect_available_cameras(self, max_cameras=10):
-        """Detecta automáticamente las cámaras disponibles usando v4l2 primero"""
-        print("🔍 Detectando cámaras disponibles...")
-        available_cameras = {}
-
-        # Método 1: Buscar usando v4l2-ctl
         try:
-            import subprocess
+            root.mainloop()
+            return selected_product
+        finally:
+            root.destroy()
+
+
+class CameraDetector:
+    """Handles camera detection and initialization"""
+    
+    def __init__(self, max_cameras: int = 10):
+        self.max_cameras = max_cameras
+    
+    def detect_available_cameras(self) -> Dict[int, CameraInfo]:
+        """Detect available cameras using multiple methods"""
+        logger.info("Detecting available cameras...")
+        available_cameras = {}
+        
+        # Method 1: v4l2-ctl
+        v4l2_cameras = self._detect_with_v4l2()
+        if v4l2_cameras:
+            available_cameras.update(v4l2_cameras)
+        
+        # Method 2: Sequential testing (fallback)
+        if not available_cameras:
+            logger.info("Falling back to sequential testing...")
+            for device_id in range(self.max_cameras):
+                if self._test_camera_quick(device_id):
+                    available_cameras[device_id] = CameraInfo(
+                        device_id=device_id,
+                        name="Unknown Camera"
+                    )
+        
+        # Method 3: Direct file search
+        if not available_cameras:
+            logger.info("Searching /dev/video* files...")
+            for path in sorted(glob.glob("/dev/video*")):
+                try:
+                    device_id = int(path.replace("/dev/video", ""))
+                    if self._test_camera_quick(device_id):
+                        available_cameras[device_id] = CameraInfo(
+                            device_id=device_id,
+                            name="Unknown Camera"
+                        )
+                except ValueError:
+                    continue
+        
+        logger.info(f"Detected {len(available_cameras)} cameras: {list(available_cameras.keys())}")
+        return available_cameras
+    
+    def _detect_with_v4l2(self) -> Dict[int, CameraInfo]:
+        """Detect cameras using v4l2-ctl"""
+        cameras = {}
+        
+        try:
             result = subprocess.run(
                 ['v4l2-ctl', '--list-devices'],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5
             )
+            
             if result.returncode == 0:
-                print("📋 Información de v4l2-ctl:")
+                logger.info("Using v4l2-ctl for camera detection")
                 lines = result.stdout.splitlines()
                 current_device_name = None
-
+                
                 for line in lines:
                     line = line.strip()
                     if not line:
                         continue
-
-                    # Si la línea no es un path → es la descripción del dispositivo
+                    
                     if not line.startswith("/dev/video"):
                         current_device_name = line
                         continue
-
-                    # Si es un path de dispositivo
+                    
                     if line.startswith("/dev/video"):
                         try:
                             device_id = int(line.replace("/dev/video", ""))
-                            available_cameras[line] = {
-                                "id": device_id,
-                                "name": current_device_name
-                            }
-                            print(f"  📷 {line} → {current_device_name}")
+                            cameras[device_id] = CameraInfo(
+                                device_id=device_id,
+                                name=current_device_name or "Unknown"
+                            )
+                            logger.info(f"Found camera: {line} -> {current_device_name}")
                         except ValueError:
-                            pass
-        except Exception as e:
-            print(f"⚠️ Error con v4l2-ctl: {e}")
-
-        # Método 2: fallback secuencial
-        if not available_cameras:
-            print("🔄 Probando dispositivos secuencialmente...")
-            for device_id in range(max_cameras):
-                if self.test_camera_quick(device_id):
-                    path = f"/dev/video{device_id}"
-                    available_cameras[path] = {"id": device_id, "name": "Unknown"}
-                    print(f"  ✅ {path} disponible")
-
-        # Método 3: buscar archivos directos
-        if not available_cameras:
-            print("📁 Buscando archivos /dev/video*...")
-            import glob
-            for path in sorted(glob.glob("/dev/video*")):
-                try:
-                    device_id = int(path.replace("/dev/video", ""))
-                    if self.test_camera_quick(device_id):
-                        available_cameras[path] = {"id": device_id, "name": "Unknown"}
-                        print(f"  ✅ {path} disponible")
-                except ValueError:
-                    pass
-
-        self.camera_devices = available_cameras
-
-        if available_cameras:
-            print(f"🎉 {len(available_cameras)} cámaras detectadas")
-        else:
-            print("❌ No se detectaron cámaras disponibles")
-
-        return available_cameras
-
-    def test_camera_quick(self, device_id, timeout=3):
-        """Prueba rápida si una cámara está disponible"""
-        import signal
+                            continue
         
+        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
+            logger.warning(f"v4l2-ctl detection failed: {e}")
+        
+        return cameras
+    
+    def _test_camera_quick(self, device_id: int, timeout: int = 3) -> bool:
+        """Quick test if camera is available"""
         def timeout_handler(signum, frame):
             raise TimeoutError()
         
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        
         try:
-            # Configurar timeout corto
-            signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(timeout)
-            
-            # Intentar abrir la cámara
             cap = cv2.VideoCapture(device_id, cv2.CAP_V4L2)
+            
             if not cap.isOpened():
                 return False
             
-            # Intentar leer un frame
             ret, frame = cap.read()
             cap.release()
             signal.alarm(0)
             
             return ret and frame is not None
-            
+        
         except (TimeoutError, Exception):
             return False
         finally:
             signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
     
-    def get_camera_info(self, device_id):
-        """Obtiene información detallada de una cámara"""
+    def get_camera_info(self, device_id: int) -> Optional[CameraInfo]:
+        """Get detailed camera information"""
         try:
             cap = cv2.VideoCapture(device_id, cv2.CAP_V4L2)
             if not cap.isOpened():
                 return None
             
-            info = {
-                'device_id': device_id,
-                'backend': cap.getBackendName(),
-                'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                'fps': cap.get(cv2.CAP_PROP_FPS),
-                'fourcc': cap.get(cv2.CAP_PROP_FOURCC)
-            }
+            info = CameraInfo(
+                device_id=device_id,
+                name="Camera",
+                backend=cap.getBackendName(),
+                width=int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                height=int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                fps=cap.get(cv2.CAP_PROP_FPS),
+                fourcc=cap.get(cv2.CAP_PROP_FOURCC)
+            )
             
             cap.release()
             return info
-            
+        
         except Exception as e:
+            logger.error(f"Error getting camera {device_id} info: {e}")
             return None
+
+
+class CameraManager:
+    """Manages camera operations and capture threads"""
     
-    def show_camera_details(self):
-        """Muestra información detallada de las cámaras detectadas"""
-        if not self.camera_devices:
-            return
+    def __init__(self, video_config: VideoConfig):
+        self.video_config = video_config
+        self.cameras: Dict[int, cv2.VideoCapture] = {}
+        self.frames: Dict[int, np.ndarray] = {}
+        self.capture_threads: List[threading.Thread] = []
+        self.running = False
+        self.detector = CameraDetector()
+    
+    def initialize_cameras(self, camera_infos: Dict[int, CameraInfo]) -> bool:
+        """Initialize cameras from detected camera info"""
+        logger.info("Initializing cameras...")
+        
+        successfully_initialized = []
+        
+        for device_id, camera_info in camera_infos.items():
+            cap, frame = self._initialize_single_camera(device_id)
             
-        print("\n📊 INFORMACIÓN DE CÁMARAS DETECTADAS:")
-        print("-" * 50)
+            if cap is not None and frame is not None:
+                self.cameras[device_id] = cap
+                self.frames[device_id] = frame
+                successfully_initialized.append(device_id)
+                logger.info(f"Camera {device_id} initialized successfully - {frame.shape}")
+            else:
+                logger.error(f"Camera {device_id} initialization failed")
         
-        for device_id in self.camera_devices:
-            info = self.get_camera_info(device_id)
-            if info:
-                print(f"📷 Cámara {device_id}:")
-                print(f"   Backend: {info['backend']}")
-                print(f"   Resolución: {info['width']}x{info['height']}")
-                print(f"   FPS: {info['fps']}")
-                print()
+        if not successfully_initialized:
+            logger.error("No cameras were initialized successfully")
+            return False
+        
+        logger.info(f"Successfully initialized {len(successfully_initialized)} cameras: {successfully_initialized}")
+        return True
     
-    def initialize_single_camera(self, device_id, timeout=10):
-        """Inicializa una sola cámara con timeout"""
-        import signal
-        
+    def _initialize_single_camera(self, device_id: int, timeout: int = 10) -> Tuple[Optional[cv2.VideoCapture], Optional[np.ndarray]]:
+        """Initialize a single camera with timeout"""
         def timeout_handler(signum, frame):
-            raise TimeoutError(f"Timeout inicializando cámara {device_id}")
+            raise TimeoutError(f"Timeout initializing camera {device_id}")
+        
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
         
         try:
-            print(f"📷 Inicializando cámara /dev/video{device_id}...")
-            
-            # Configurar timeout
-            signal.signal(signal.SIGALRM, timeout_handler)
+            logger.info(f"Initializing camera /dev/video{device_id}...")
             signal.alarm(timeout)
             
-            # Intentar con diferentes backends
+            # Try different backends
             for backend in [cv2.CAP_V4L2, cv2.CAP_ANY]:
                 try:
                     cap = cv2.VideoCapture(device_id, backend)
                     if cap.isOpened():
                         break
                     cap.release()
-                except:
+                except Exception:
                     continue
             else:
-                raise Exception("No se pudo abrir con ningún backend")
+                raise CameraError("Could not open with any backend")
             
-            # Configurar parámetros básicos
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M','J','P','G'))
+            # Configure camera
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.video_config.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.video_config.height)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
             
-            # Probar captura rápida
-            for _ in range(3):  # Intentar 3 veces
+            # Test capture
+            for _ in range(3):
                 ret, frame = cap.read()
                 if ret and frame is not None:
-                    signal.alarm(0)  # Cancelar timeout
+                    signal.alarm(0)
                     return cap, frame
                 time.sleep(0.1)
             
             cap.release()
-            raise Exception("No puede capturar frames")
-            
-        except TimeoutError as e:
-            print(f"⏰ {e}")
+            raise CameraError("Cannot capture frames")
+        
+        except (TimeoutError, CameraError) as e:
+            logger.error(f"Camera {device_id}: {e}")
             return None, None
         except Exception as e:
-            print(f"❌ Error cámara {device_id}: {e}")
+            logger.error(f"Unexpected error with camera {device_id}: {e}")
             return None, None
         finally:
-            signal.alarm(0)  # Asegurar que se cancele el timeout
-
-    def initialize_cameras(self):
-        """Inicializa todas las cámaras detectadas"""
-        # Detectar cámaras disponibles primero
-        if not self.camera_devices:
-            available_cameras = self.detect_available_cameras()
-            if not available_cameras:
-                print("❌ No se encontraron cámaras disponibles")
-                return False
-        
-        print("\n🔍 Inicializando cámaras detectadas...")
-        self.show_camera_details()
-        
-        successfully_initialized = []
-        
-        for device_id in self.camera_devices:
-            cap, frame = self.initialize_single_camera(device_id)
-            
-            if cap is not None and frame is not None:
-                self.cameras[device_id] = cap
-                self.frames[device_id] = frame
-                successfully_initialized.append(device_id)
-                print(f"✅ Cámara {device_id} OK - {frame.shape}")
-            else:
-                print(f"❌ Cámara {device_id} falló en inicialización")
-        
-        # Actualizar la lista con solo las cámaras que funcionan
-        self.camera_devices = successfully_initialized
-        
-        if len(self.cameras) == 0:
-            print("❌ No se inicializó ninguna cámara")
-            return False
-            
-        print(f"\n🎉 {len(self.cameras)} cámaras inicializadas correctamente: {successfully_initialized}")
-        return True
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
     
-    def force_detect_cameras(self):
-        """Fuerza una nueva detección de cámaras (para usar con tecla D)"""
-        print("\n🔄 FORZANDO DETECCIÓN DE CÁMARAS...")
-        self.cleanup_cameras()
-        self.camera_devices = []  # Limpiar lista actual
-        time.sleep(1)
+    def start_capture_threads(self) -> None:
+        """Start capture threads for all cameras"""
+        if self.running:
+            return
         
-        available_cameras = self.detect_available_cameras()
-        if available_cameras:
-            self.initialize_cameras()
-            self.start_capture_threads()
-            print("✅ Detección completada")
-        else:
-            print("❌ No se encontraron nuevas cámaras")
+        self.running = True
+        self.capture_threads = []
+        
+        for device_id in self.cameras:
+            thread = threading.Thread(target=self._capture_thread, args=(device_id,), daemon=True)
+            thread.start()
+            self.capture_threads.append(thread)
+            logger.info(f"Capture thread started for camera {device_id}")
     
-    def capture_thread(self, device_id):
-        """Hilo de captura continua para una cámara"""
+    def _capture_thread(self, device_id: int) -> None:
+        """Capture thread for a single camera"""
         cap = self.cameras[device_id]
         
         while self.running:
-            ret, frame = cap.read()
-            if ret:
-                self.frames[device_id] = frame.copy()
+            try:
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    self.frames[device_id] = frame.copy()
+                else:
+                    logger.warning(f"Failed to read from camera {device_id}")
                 
-                # Si está grabando, escribir al video
-                if self.recording and device_id in self.writers:
-                    self.writers[device_id].write(frame)
-            
-            time.sleep(1/self.fps)
+                time.sleep(1 / self.video_config.fps)
+            except Exception as e:
+                logger.error(f"Error in capture thread for camera {device_id}: {e}")
+                break
     
-    def start_capture_threads(self):
-        """Inicia hilos de captura para todas las cámaras"""
-        self.threads = []
-        for device_id in self.cameras.keys():
-            thread = threading.Thread(target=self.capture_thread, args=(device_id,))
-            thread.daemon = True
-            thread.start()
-            self.threads.append(thread)
-            print(f"🎬 Hilo iniciado para cámara {device_id}")
+    def stop_capture_threads(self) -> None:
+        """Stop all capture threads"""
+        self.running = False
+        
+        for thread in self.capture_threads:
+            thread.join(timeout=2.0)
+        
+        self.capture_threads = []
+        logger.info("All capture threads stopped")
     
-    def start_recording(self):
-        """Inicia la grabación después de obtener el nombre del producto versionado"""
+    def cleanup(self) -> None:
+        """Clean up camera resources"""
+        self.stop_capture_threads()
+        
+        for cap in self.cameras.values():
+            cap.release()
+        
+        self.cameras.clear()
+        self.frames.clear()
+        logger.info("Camera resources cleaned up")
+
+
+class VideoRecorder:
+    """Handles video recording operations"""
+    
+    def __init__(self, camera_manager: CameraManager, product_manager: ProductManager, video_config: VideoConfig, clips_base_dir: Path):
+        self.camera_manager = camera_manager
+        self.product_manager = product_manager
+        self.video_config = video_config
+        self.clips_base_dir = clips_base_dir
+        self.writers: Dict[int, cv2.VideoWriter] = {}
+        self.recording = False
+        self.record_start_time: Optional[float] = None
+        self.current_product: Optional[str] = None
+    
+    def start_recording(self) -> bool:
+        """Start recording after getting product name"""
         if self.recording:
-            return
-            
-        # Verificar que hay cámaras disponibles
-        if not self.cameras:
-            print("❌ No hay cámaras disponibles para grabar")
-            return
-            
-        # Obtener nombre del producto con versionado automático
-        print("🏷️  Seleccionando producto...")
+            return False
+        
+        if not self.camera_manager.cameras:
+            logger.error("No cameras available for recording")
+            return False
+        
+        logger.info("Selecting product...")
         versioned_product_name = self.product_manager.get_product_input()
         
         if versioned_product_name is None:
-            print("❌ Grabación cancelada por el usuario")
-            return
+            logger.info("Recording cancelled by user")
+            return False
         
         self.current_product = versioned_product_name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Crear directorio del producto versionado si no existe
-        product_dir = os.path.join(self.base_clips_dir, versioned_product_name)
-        if not os.path.exists(product_dir):
-            os.makedirs(product_dir)
-            print(f"📁 Carpeta del producto creada: {product_dir}/")
+        # Create product directory
+        product_dir = self.clips_base_dir / versioned_product_name
+        product_dir.mkdir(exist_ok=True)
+        logger.info(f"Product directory ready: {product_dir}")
         
         self.writers = {}
         
-        print(f"\n🔴 GRABANDO: {versioned_product_name} - {timestamp}")
-        print(f"📷 Usando {len(self.cameras)} cámaras: {list(self.cameras.keys())}")
+        logger.info(f"RECORDING: {versioned_product_name} - {timestamp}")
+        logger.info(f"Using {len(self.camera_manager.cameras)} cameras: {list(self.camera_manager.cameras.keys())}")
         
-        for device_id in self.cameras.keys():
+        for device_id in self.camera_manager.cameras:
             filename = f"clip_cam{device_id}_{versioned_product_name}_{timestamp}.mp4"
-            filepath = os.path.join(product_dir, filename)
-            writer = cv2.VideoWriter(filepath, self.fourcc, self.fps, (self.width, self.height))
+            filepath = product_dir / filename
+            
+            writer = cv2.VideoWriter(
+                str(filepath),
+                self.video_config.fourcc,
+                self.video_config.fps,
+                (self.video_config.width, self.video_config.height)
+            )
             
             if writer.isOpened():
                 self.writers[device_id] = writer
-                print(f"📹 Grabando: {filename}")
+                logger.info(f"Recording: {filename}")
             else:
-                print(f"❌ Error creando writer para cámara {device_id}")
+                logger.error(f"Error creating writer for camera {device_id}")
         
         if self.writers:
             self.recording = True
             self.record_start_time = time.time()
+            return True
+        
+        return False
     
-    def stop_recording(self):
-        """Detiene la grabación"""
+    def write_frames(self) -> None:
+        """Write current frames to video files"""
         if not self.recording:
             return
-            
-        self.recording = False
-        duration = time.time() - self.record_start_time
         
-        # Cerrar todos los writers
+        for device_id, writer in self.writers.items():
+            if device_id in self.camera_manager.frames:
+                frame = self.camera_manager.frames[device_id]
+                writer.write(frame)
+    
+    def stop_recording(self) -> None:
+        """Stop recording"""
+        if not self.recording:
+            return
+        
+        self.recording = False
+        duration = time.time() - self.record_start_time if self.record_start_time else 0
+        
         for device_id, writer in self.writers.items():
             writer.release()
-            print(f"💾 Guardado: clip_cam{device_id} ({duration:.1f}s)")
+            logger.info(f"Saved: clip_cam{device_id} ({duration:.1f}s)")
         
-        self.writers = {}
-        print(f"⏹️  Grabación terminada - Duración: {duration:.1f}s")
-        print(f"📂 Clips guardados en: clips/{self.current_product}/\n")
+        self.writers.clear()
+        logger.info(f"Recording finished - Duration: {duration:.1f}s")
+        logger.info(f"Clips saved to: clips/{self.current_product}/")
     
-    def get_actual_window_size(self, window_name):
-        """FIXED: Obtiene el tamaño real actual de la ventana de manera más confiable"""
+    def cleanup(self) -> None:
+        """Clean up recording resources"""
+        if self.recording:
+            self.stop_recording()
+
+
+class DisplayManager:
+    """Manages the display and user interface"""
+    
+    def __init__(self, camera_manager: CameraManager, window_config: WindowConfig):
+        self.camera_manager = camera_manager
+        self.window_config = window_config
+        self.last_known_size = (window_config.width, window_config.height)
+        self.size_check_interval = 0.1
+        self.last_size_check = 0
+        self.fullscreen = False
+    
+    def create_display_grid(self, window_name: Optional[str] = None, current_product: Optional[str] = None, recording: bool = False, record_start_time: Optional[float] = None) -> Optional[np.ndarray]:
+        """Create display grid adapting to window size"""
+        if not self.camera_manager.frames:
+            return None
+        
+        # Get current window size
+        if window_name:
+            window_width, window_height = self._get_actual_window_size(window_name)
+        else:
+            window_width, window_height = self.window_config.width, self.window_config.height
+        
+        num_cameras = len(self.camera_manager.cameras)
+        
+        # Calculate dimensions with text margin
+        text_margin = 60
+        effective_width = max(self.window_config.max_width -20 ,window_width - 20, self.window_config.min_width - 20)
+        effective_height = max(self.window_config.max_height - 20, window_height - text_margin, self.window_config.min_height - text_margin)
+        
+        # Calculate camera dimensions based on layout
+        cam_width, cam_height = self._calculate_camera_dimensions(num_cameras, effective_width, effective_height)
+        
+        # Process camera frames
+        display_frames = []
+        for device_id in sorted(self.camera_manager.cameras.keys()):
+            if device_id in self.camera_manager.frames:
+                frame = self._process_frame(
+                    self.camera_manager.frames[device_id].copy(),
+                    device_id,
+                    cam_width,
+                    cam_height,
+                    current_product,
+                    recording,
+                    record_start_time
+                )
+                display_frames.append(frame)
+        
+        # Create final grid
+        return self._create_grid(display_frames, num_cameras, cam_width, cam_height)
+    
+    def _get_actual_window_size(self, window_name: str) -> Tuple[int, int]:
+        """Get actual current window size"""
         current_time = time.time()
         
-        # Solo verificar el tamaño cada cierto intervalo para evitar overhead
         if current_time - self.last_size_check < self.size_check_interval:
             return self.last_known_size
         
         self.last_size_check = current_time
         
         try:
-            # Método 1: Obtener el rect completo de la ventana
             rect = cv2.getWindowImageRect(window_name)
             if rect and len(rect) >= 4:
                 new_width, new_height = rect[2], rect[3]
                 
-                # Validar que los valores son razonables
-                if (new_width >= self.min_window_width and 
-                    new_height >= self.min_window_height and
-                    new_width <= self.max_window_width and 
-                    new_height <= self.max_window_height):
-                    
+                if (self.window_config.min_width <= new_width <= self.window_config.max_width and
+                    self.window_config.min_height <= new_height <= self.window_config.max_height):
+                    self.last_known_size = (new_width, new_height)
                     return self.last_known_size
-        except Exception as e:
-            # Si falla la detección, usar el último tamaño conocido
+        except Exception:
             pass
         
         return self.last_known_size
-
-    def create_display_grid(self, window_name=None):
-        """FIXED: Crea la vista en grid adaptándose dinámicamente al tamaño de ventana"""
-        if len(self.frames) == 0:
-            return None
-        
-        # Obtener tamaño actual real de la ventana
-        if window_name:
-            window_width, window_height = self.get_actual_window_size(window_name)
-        else:
-            window_width, window_height = self.window_width, self.window_height
-        
-        num_cameras = len(self.cameras)
-        
-        # FIXED: Cálculo mejorado de dimensiones con margen para texto
-        text_margin = 60  # Espacio extra para texto y controles
-        effective_width = max(window_width - 20, self.min_window_width - 20)
-        effective_height = max(window_height - text_margin, self.min_window_height - text_margin)
-        
-        # Calcular dimensiones de cada cámara según el layout
+    
+    def _calculate_camera_dimensions(self, num_cameras: int, effective_width: int, effective_height: int) -> Tuple[int, int]:
+        """Calculate camera dimensions based on number of cameras"""
         if num_cameras == 1:
-            cam_width = effective_width
-            cam_height = effective_height
+            cam_width, cam_height = effective_width, effective_height
         elif num_cameras == 2:
-            cam_width = effective_width // 2
-            cam_height = effective_height
+            cam_width, cam_height = effective_width // 2, effective_height
         elif num_cameras == 3:
-            cam_width = effective_width // 2
-            cam_height = effective_height // 2
-        elif num_cameras >= 4:
-            cam_width = effective_width // 2
-            cam_height = effective_height // 2
+            cam_width, cam_height = effective_width // 2, effective_height // 2
+        else:  # 4 or more
+            cam_width, cam_height = effective_width // 2, effective_height // 2
         
-        # FIXED: Asegurar dimensiones mínimas pero escalables
-        min_cam_width = 160
-        min_cam_height = 120
-        cam_width = max(self.max_window_width, cam_width, min_cam_width)
-        cam_height = max(self.max_window_height, cam_height, min_cam_height)
+        # Ensure minimum dimensions
+        min_cam_width, min_cam_height = 160, 120
+        cam_width = max(cam_width, min_cam_width)
+        cam_height = max(cam_height, min_cam_height)
         
-        # FIXED: Mantener aspect ratio si es posible
-        aspect_ratio = 4/3  # Ratio típico de cámaras
+        # Maintain aspect ratio
+        aspect_ratio = 4/3
         if cam_width / cam_height > aspect_ratio * 1.2:
-            # Si es muy ancho, ajustar el ancho
             cam_width = int(cam_height * aspect_ratio)
         elif cam_height / cam_width > (1/aspect_ratio) * 1.2:
-            # Si es muy alto, ajustar la altura
             cam_height = int(cam_width / aspect_ratio)
         
-        # Procesar frames de las cámaras
-        display_frames = []
-        for device_id in sorted(self.cameras.keys()):
-            if device_id in self.frames:
-                frame = self.frames[device_id].copy()
-                
-                # FIXED: Calcular tamaño de fuente más dinámico y escalable
-                font_scale = max(0.4, min(1.5, (cam_width + cam_height) / 800.0))
-                thickness = max(1, int(2 * font_scale))
-                
-                # Información a mostrar
-                if self.current_product:
-                    product_text = f'Cam {device_id} - {self.current_product}'
-                else:
-                    product_text = f'Cam {device_id}'
-                    
-                color = (0, 0, 255) if self.recording else (0, 255, 0)
-                status = "REC" if self.recording else "LIVE"
-                
-                # FIXED: Posiciones de texto escaladas dinámicamente
-                base_y = max(20, int(25 * font_scale))
-                line_spacing = max(20, int(25 * font_scale))
-                
-                cv2.putText(frame, product_text, (10, base_y), 
-                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
-                cv2.putText(frame, status, (10, base_y + line_spacing), 
-                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
-                
-                if self.recording and self.record_start_time:
-                    duration = time.time() - self.record_start_time
-                    cv2.putText(frame, f'{duration:.1f}s', (10, base_y + 2 * line_spacing), 
-                               cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
-                
-                # FIXED: Redimensionar frame con interpolación suave
-                frame_resized = cv2.resize(frame, (cam_width, cam_height), 
-                                         interpolation=cv2.INTER_LINEAR)
-                display_frames.append(frame_resized)
+        return cam_width, cam_height
+    
+    def _process_frame(self, frame: np.ndarray, device_id: int, cam_width: int, cam_height: int, 
+                      current_product: Optional[str], recording: bool, record_start_time: Optional[float]) -> np.ndarray:
+        """Process and annotate a single frame"""
+        # Calculate dynamic font scale
+        font_scale = max(0.4, min(1.5, (cam_width + cam_height) / 800.0))
+        thickness = max(1, int(2 * font_scale))
         
-        # FIXED: Crear grid final con mejor manejo de espacios
+        # Prepare text information
+        if current_product:
+            product_text = f'Cam {device_id} - {current_product}'
+        else:
+            product_text = f'Cam {device_id}'
+        
+        color = (0, 0, 255) if recording else (0, 255, 0)
+        status = "REC" if recording else "LIVE"
+        
+        # Calculate text positions
+        base_y = max(20, int(25 * font_scale))
+        line_spacing = max(20, int(25 * font_scale))
+        
+        # Add text overlays
+        cv2.putText(frame, product_text, (10, base_y), 
+                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+        cv2.putText(frame, status, (10, base_y + line_spacing), 
+                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+        
+        if recording and record_start_time:
+            duration = time.time() - record_start_time
+            cv2.putText(frame, f'{duration:.1f}s', (10, base_y + 2 * line_spacing), 
+                       cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+        
+        # Resize frame
+        return cv2.resize(frame, (cam_width, cam_height), interpolation=cv2.INTER_LINEAR)
+    
+    def _create_grid(self, display_frames: List[np.ndarray], num_cameras: int, cam_width: int, cam_height: int) -> Optional[np.ndarray]:
+        """Create the final display grid"""
         if num_cameras == 1:
             return display_frames[0]
         elif num_cameras == 2:
             return np.hstack((display_frames[0], display_frames[1]))
         elif num_cameras == 3:
-            # 2 arriba, 1 abajo centrado
+            # 2 on top, 1 on bottom centered
             top_row = np.hstack((display_frames[0], display_frames[1]))
-            # Crear frame negro del mismo tamaño para completar la fila
             black_frame = np.zeros((cam_height, cam_width, 3), dtype=np.uint8)
             bottom_row = np.hstack((display_frames[2], black_frame))
             return np.vstack((top_row, bottom_row))
         elif num_cameras >= 4:
-            # Grid 2x2
+            # 2x2 grid
             top_row = np.hstack((display_frames[0], display_frames[1]))
             bottom_row = np.hstack((display_frames[2], display_frames[3]))
             return np.vstack((top_row, bottom_row))
         
         return None
     
-    def run(self):
-        """Ejecuta la aplicación principal"""
-        if not self.initialize_cameras():
-            return
+    def toggle_fullscreen(self, window_name: str) -> bool:
+        """Toggle fullscreen mode"""
+        if not self.fullscreen:
+            cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            self.fullscreen = True
+            logger.info("Switched to fullscreen mode")
+        else:
+            cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window_name, self.window_config.width, self.window_config.height)
+            self.fullscreen = False
+            logger.info("Switched to normal window mode")
+        
+        return self.fullscreen
+    
+    def resize_window(self, window_name: str, increase: bool) -> Tuple[int, int]:
+        """Resize window by a factor"""
+        if self.fullscreen:
+            return self.window_config.width, self.window_config.height
+        
+        factor = 1.2 if increase else 0.8
+        new_width = int(self.window_config.width * factor)
+        new_height = int(self.window_config.height * factor)
+        
+        # Apply limits
+        new_width = max(self.window_config.min_width, min(self.window_config.max_width, new_width))
+        new_height = max(self.window_config.min_height, min(self.window_config.max_height, new_height))
+        
+        self.window_config.width = new_width
+        self.window_config.height = new_height
+        
+        cv2.resizeWindow(window_name, new_width, new_height)
+        self.last_known_size = (new_width, new_height)
+        
+        logger.info(f"Window resized to: {new_width}x{new_height}")
+        return new_width, new_height
+
+
+class MultiCameraRecorder:
+    """Main application class that orchestrates all components"""
+    
+    def __init__(self, clips_base_dir: str = "clips"):
+        # Configuration
+        self.clips_base_dir = Path(clips_base_dir)
+        self.video_config = VideoConfig()
+        self.window_config = WindowConfig()
+        
+        # Components
+        self.product_manager = ProductManager(clips_base_dir=str(self.clips_base_dir))
+        self.camera_manager = CameraManager(self.video_config)
+        self.video_recorder = VideoRecorder(
+            self.camera_manager, 
+            self.product_manager, 
+            self.video_config, 
+            self.clips_base_dir
+        )
+        self.display_manager = DisplayManager(self.camera_manager, self.window_config)
+        
+        # State
+        self.running = True
+        
+        # Ensure clips directory exists
+        self.clips_base_dir.mkdir(exist_ok=True)
+    
+    def initialize_system(self) -> bool:
+        """Initialize the camera system"""
+        detector = CameraDetector()
+        available_cameras = detector.detect_available_cameras()
+        
+        if not available_cameras:
+            logger.error("No cameras found")
+            return False
+        
+        if not self.camera_manager.initialize_cameras(available_cameras):
+            logger.error("Failed to initialize cameras")
+            return False
+        
+        self.camera_manager.start_capture_threads()
+        return True
+    
+    def force_camera_detection(self, window_name: str) -> str:
+        """Force new camera detection and return updated window name"""
+        logger.info("Forcing camera detection...")
+        old_camera_count = len(self.camera_manager.cameras)
+        
+        # Clean up current cameras
+        self.camera_manager.cleanup()
+        time.sleep(1)
+        
+        # Re-initialize
+        if self.initialize_system():
+            new_camera_count = len(self.camera_manager.cameras)
+            logger.info("Camera detection completed")
             
-        self.start_capture_threads()
+            if new_camera_count != old_camera_count:
+                # Update window name if camera count changed
+                new_window_name = f'Smart Cooler - {new_camera_count} Cameras (Auto-detect)'
+                cv2.destroyWindow(window_name)
+                cv2.namedWindow(new_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+                cv2.resizeWindow(new_window_name, self.window_config.width, self.window_config.height)
+                return new_window_name
+        else:
+            logger.error("Failed to re-initialize cameras")
         
-        # FIXED: Configurar ventana de OpenCV con mejor manejo
-        window_name = f'Smart Cooler - {len(self.cameras)} Cameras (Auto-detect)'
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-        cv2.resizeWindow(window_name, self.window_width, self.window_height)
+        return window_name
+    
+    def restart_cameras(self, window_name: str) -> str:
+        """Restart cameras and return updated window name"""
+        logger.info("Restarting cameras...")
+        old_camera_count = len(self.camera_manager.cameras)
         
-        # FIXED: Configurar callback para detectar redimensionamiento manual
-        def on_window_resize(val):
-            # Esta función se llama cuando OpenCV detecta cambios
-            pass
+        # Get current camera info before cleanup
+        current_cameras = list(self.camera_manager.cameras.keys())
         
-        # Dar tiempo para que se cree la ventana
-        time.sleep(0.5)
+        # Clean up and re-initialize with same cameras
+        self.camera_manager.cleanup()
+        time.sleep(1)
         
+        # Try to re-initialize the same cameras
+        detector = CameraDetector()
+        camera_infos = {}
+        for device_id in current_cameras:
+            info = detector.get_camera_info(device_id)
+            if info:
+                camera_infos[device_id] = info
+        
+        if camera_infos and self.camera_manager.initialize_cameras(camera_infos):
+            self.camera_manager.start_capture_threads()
+            new_camera_count = len(self.camera_manager.cameras)
+            logger.info("Camera restart completed")
+            
+            if new_camera_count != old_camera_count:
+                new_window_name = f'Smart Cooler - {new_camera_count} Cameras (Auto-detect)'
+                cv2.destroyWindow(window_name)
+                cv2.namedWindow(new_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+                cv2.resizeWindow(new_window_name, self.window_config.width, self.window_config.height)
+                return new_window_name
+        else:
+            logger.error("Failed to restart cameras")
+        
+        return window_name
+    
+    def print_startup_info(self) -> None:
+        """Print startup information"""
         print("\n" + "="*70)
-        print("🎬 SMART COOLER - GRABADOR MULTI-CÁMARA (DETECCIÓN AUTOMÁTICA)")
+        print("SMART COOLER - MULTI-CAMERA RECORDER (AUTO-DETECT)")
         print("="*70)
-        print("Controles:")
-        print("  SPACE - Seleccionar producto y grabar/parar")
-        print("  Q     - Salir")
-        print("  ESC   - Salir")
-        print("  R     - Reiniciar cámaras")
-        print("  D     - Forzar detección de nuevas cámaras")
-        print("  +/-   - Cambiar tamaño de ventana")
-        print("  F     - Pantalla completa / Normal")
+        print("Controls:")
+        print("  SPACE - Select product and record/stop")
+        print("  Q     - Exit")
+        print("  ESC   - Exit")
+        print("  R     - Restart cameras")
+        print("  D     - Force detection of new cameras")
+        print("  +/-   - Change window size")
+        print("  F     - Toggle fullscreen")
         print("="*70)
-        print(f"📁 Clips se guardan en: {self.base_clips_dir}/[producto_vN]/")
-        print(f"📷 Cámaras activas: {len(self.cameras)} -> {list(self.cameras.keys())}")
+        print(f"Clips saved to: {self.clips_base_dir}/[product_vN]/")
+        print(f"Active cameras: {len(self.camera_manager.cameras)} -> {list(self.camera_manager.cameras.keys())}")
         if self.product_manager.products:
-            print(f"🏷️  Productos disponibles: {len(self.product_manager.products)}")
-        print("🔄 Versionado automático: producto_v1, producto_v2, etc.")
-        print("🟢 LISTO - Presiona SPACE para seleccionar producto y grabar")
-        print("💡 TIP: Redimensiona la ventana arrastrando las esquinas\n")
+            print(f"Available products: {len(self.product_manager.products)}")
+        print("Automatic versioning: product_v1, product_v2, etc.")
+        print("READY - Press SPACE to select product and record")
+        print("TIP: Resize window by dragging corners\n")
+    
+    def handle_key_input(self, key: int, window_name: str) -> Tuple[bool, str]:
+        """Handle keyboard input and return (continue_running, window_name)"""
+        if key == ord('q') or key == 27:  # Q or ESC
+            logger.info("Exit requested by user")
+            return False, window_name
         
-        # FIXED: Variable para pantalla completa
-        fullscreen = False
+        elif key == ord(' '):  # SPACE
+            if self.video_recorder.recording:
+                self.video_recorder.stop_recording()
+            else:
+                self.video_recorder.start_recording()
+        
+        elif key == ord('r'):  # Restart cameras
+            window_name = self.restart_cameras(window_name)
+        
+        elif key == ord('d'):  # Force detection
+            window_name = self.force_camera_detection(window_name)
+        
+        elif key == ord('f'):  # Toggle fullscreen
+            self.display_manager.toggle_fullscreen(window_name)
+        
+        elif key == ord('+') or key == ord('='):  # Increase size
+            self.display_manager.resize_window(window_name, increase=True)
+        
+        elif key == ord('-'):  # Decrease size
+            self.display_manager.resize_window(window_name, increase=False)
+        
+        return True, window_name
+    
+    def run(self) -> None:
+        """Main application loop"""
+        if not self.initialize_system():
+            logger.error("System initialization failed")
+            return
+        
+        # Setup window
+        window_name = f'Smart Cooler - {len(self.camera_manager.cameras)} Cameras (Auto-detect)'
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+        cv2.resizeWindow(window_name, self.window_config.width, self.window_config.height)
+        time.sleep(0.5)  # Let window initialize
+        
+        self.print_startup_info()
         
         try:
             while self.running:
-                grid = self.create_display_grid(window_name)
+                # Update video recording with current frames
+                self.video_recorder.write_frames()
+                
+                # Create and display grid
+                grid = self.display_manager.create_display_grid(
+                    window_name=window_name,
+                    current_product=self.video_recorder.current_product,
+                    recording=self.video_recorder.recording,
+                    record_start_time=self.video_recorder.record_start_time
+                )
+                
                 if grid is not None:
                     cv2.imshow(window_name, grid)
                 
-                # Verificar si la ventana fue cerrada con X
+                # Check if window was closed
                 try:
                     if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-                        print("\n👋 Ventana cerrada por usuario")
+                        logger.info("Window closed by user")
                         break
-                except:
-                    # Si la ventana no existe, salir
+                except cv2.error:
+                    logger.info("Window no longer exists")
                     break
                 
+                # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
-                
-                if key == ord('q') or key == 27:  # Q o ESC
-                    print("\n👋 Saliendo...")
-                    break
-                elif key == ord(' '):  # SPACE
-                    if self.recording:
-                        self.stop_recording()
-                    else:
-                        self.start_recording()
-                elif key == ord('r'):
-                    print("\n🔄 Reiniciando cámaras...")
-                    self.cleanup_cameras()
-                    time.sleep(1)
-                    if self.initialize_cameras():
-                        self.start_capture_threads()
-                        # Actualizar nombre de ventana si cambió el número de cámaras
-                        cv2.destroyWindow(window_name)
-                        window_name = f'Smart Cooler - {len(self.cameras)} Cameras (Auto-detect)'
-                        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-                        cv2.resizeWindow(window_name, self.window_width, self.window_height)
-                elif key == ord('d'):  # Nueva tecla para forzar detección
-                    old_window = window_name
-                    self.force_detect_cameras()
-                    # Actualizar ventana si cambió el número de cámaras
-                    new_window = f'Smart Cooler - {len(self.cameras)} Cameras (Auto-detect)'
-                    if old_window != new_window:
-                        cv2.destroyWindow(old_window)
-                        cv2.namedWindow(new_window, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-                        cv2.resizeWindow(new_window, self.window_width, self.window_height)
-                        window_name = new_window
-                elif key == ord('f'):  # FIXED: Pantalla completa
-                    if not fullscreen:
-                        cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-                        fullscreen = True
-                        print("🖥️  Modo pantalla completa")
-                    else:
-                        cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
-                        cv2.resizeWindow(window_name, self.window_width, self.window_height)
-                        fullscreen = False
-                        print("🪟 Modo ventana normal")
-                elif key == ord('+') or key == ord('='):  # Aumentar tamaño
-                    if not fullscreen:
-                        self.window_width = min(self.max_window_width, int(self.window_width * 1.2))
-                        self.window_height = min(self.max_window_height, int(self.window_height * 1.2))
-                        cv2.resizeWindow(window_name, self.window_width, self.window_height)
-                        self.last_known_size = (self.window_width, self.window_height)
-                        print(f"🔍 Tamaño aumentado: {self.window_width}x{self.window_height}")
-                elif key == ord('-'):  # Reducir tamaño
-                    if not fullscreen:
-                        self.window_width = max(self.min_window_width, int(self.window_width * 0.8))
-                        self.window_height = max(self.min_window_height, int(self.window_height * 0.8))
-                        cv2.resizeWindow(window_name, self.window_width, self.window_height)
-                        self.last_known_size = (self.window_width, self.window_height)
-                        print(f"🔍 Tamaño reducido: {self.window_width}x{self.window_height}")
+                if key != 255:  # Key was pressed
+                    continue_running, window_name = self.handle_key_input(key, window_name)
+                    if not continue_running:
+                        break
         
         except KeyboardInterrupt:
-            print("\n⏹️  Detenido por usuario")
+            logger.info("Interrupted by user")
+        
+        except Exception as e:
+            logger.error(f"Unexpected error in main loop: {e}")
         
         finally:
             self.cleanup()
     
-    def cleanup_cameras(self):
-        """Limpia solo las cámaras"""
-        for cap in self.cameras.values():
-            cap.release()
-        self.cameras = {}
-        self.frames = {}
-    
-    def cleanup(self):
-        """Limpia todos los recursos"""
-        print("\n🧹 Limpiando recursos...")
+    def cleanup(self) -> None:
+        """Clean up all resources"""
+        logger.info("Cleaning up resources...")
         
         self.running = False
         
-        if self.recording:
-            self.stop_recording()
+        # Stop recording if active
+        self.video_recorder.cleanup()
         
-        # Liberar cámaras
-        self.cleanup_cameras()
+        # Clean up camera resources
+        self.camera_manager.cleanup()
         
-        # Cerrar ventanas
+        # Close all OpenCV windows
         cv2.destroyAllWindows()
         
-        print("✅ Limpieza completa")
+        logger.info("Cleanup completed")
 
-        
+
 def main():
-    recorder = MultiCameraRecorder()
-    recorder.run()
+    """Entry point of the application"""
+    try:
+        recorder = MultiCameraRecorder()
+        recorder.run()
+    except Exception as e:
+        logger.error(f"Application failed to start: {e}")
+        return 1
+    
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    exit(main())

@@ -1,0 +1,72 @@
+2025-08-27 14:13:56,518 - __main__ - INFO - Clips directory ready: clips
+2025-08-27 14:13:56,518 - __main__ - INFO - Detecting available cameras...
+2025-08-27 14:13:56,770 - __main__ - INFO - Using v4l2-ctl for camera detection
+2025-08-27 14:13:56,770 - __main__ - INFO - Found camera: /dev/video0 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-2.1):
+2025-08-27 14:13:56,770 - __main__ - INFO - Found camera: /dev/video1 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-2.1):
+2025-08-27 14:13:56,770 - __main__ - INFO - Found camera: /dev/video4 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-4):
+2025-08-27 14:13:56,770 - __main__ - INFO - Found camera: /dev/video5 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-4):
+2025-08-27 14:13:56,770 - __main__ - INFO - Found camera: /dev/video2 -> Integrated_Webcam_HD: Integrate (usb-0000:00:14.0-6):
+2025-08-27 14:13:56,770 - __main__ - INFO - Found camera: /dev/video3 -> Integrated_Webcam_HD: Integrate (usb-0000:00:14.0-6):
+2025-08-27 14:13:56,771 - __main__ - INFO - Detected 6 cameras: [0, 1, 4, 5, 2, 3]
+2025-08-27 14:13:56,771 - __main__ - INFO - Initializing cameras...
+2025-08-27 14:13:56,771 - __main__ - INFO - Initializing camera /dev/video0...
+2025-08-27 14:13:57,142 - __main__ - INFO - Camera 0 initialized successfully - (600, 800, 3)
+2025-08-27 14:13:57,142 - __main__ - INFO - Initializing camera /dev/video1...
+2025-08-27 14:13:57,144 - __main__ - ERROR - Camera 1: Could not open with any backend
+2025-08-27 14:13:57,144 - __main__ - ERROR - Camera 1 initialization failed
+2025-08-27 14:13:57,145 - __main__ - INFO - Initializing camera /dev/video4...
+2025-08-27 14:13:57,519 - __main__ - INFO - Camera 4 initialized successfully - (600, 800, 3)
+2025-08-27 14:13:57,520 - __main__ - INFO - Initializing camera /dev/video5...
+2025-08-27 14:13:57,521 - __main__ - ERROR - Camera 5: Could not open with any backend
+2025-08-27 14:13:57,521 - __main__ - ERROR - Camera 5 initialization failed
+2025-08-27 14:13:57,521 - __main__ - INFO - Initializing camera /dev/video2...
+2025-08-27 14:13:57,706 - __main__ - INFO - Camera 2 initialized successfully - (480, 848, 3)
+2025-08-27 14:13:57,706 - __main__ - INFO - Initializing camera /dev/video3...
+2025-08-27 14:13:57,708 - __main__ - ERROR - Camera 3: Could not open with any backend
+2025-08-27 14:13:57,708 - __main__ - ERROR - Camera 3 initialization failed
+2025-08-27 14:13:57,708 - __main__ - INFO - Successfully initialized 3 cameras: [0, 4, 2]
+2025-08-27 14:13:57,708 - __main__ - INFO - Capture thread started for camera 0
+2025-08-27 14:13:57,709 - __main__ - INFO - Capture thread started for camera 4
+2025-08-27 14:13:57,709 - __main__ - INFO - Capture thread started for camera 2
+2025-08-27 14:14:09,378 - __main__ - INFO - Exit requested by user
+2025-08-27 14:14:09,378 - __main__ - INFO - Cleaning up resources...
+2025-08-27 14:14:09,391 - __main__ - INFO - All capture threads stopped
+2025-08-27 14:14:09,424 - __main__ - INFO - Camera resources cleaned up
+2025-08-27 14:14:09,425 - __main__ - INFO - Cleanup completed
+2025-08-27 14:15:22,950 - __main__ - INFO - Clips directory ready: clips
+2025-08-27 14:15:22,951 - __main__ - INFO - Detecting available cameras...
+2025-08-27 14:15:23,204 - __main__ - INFO - Using v4l2-ctl for camera detection
+2025-08-27 14:15:23,204 - __main__ - INFO - Found camera: /dev/video0 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-2.1):
+2025-08-27 14:15:23,204 - __main__ - INFO - Found camera: /dev/video1 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-2.1):
+2025-08-27 14:15:23,204 - __main__ - INFO - Found camera: /dev/video4 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-4):
+2025-08-27 14:15:23,204 - __main__ - INFO - Found camera: /dev/video5 -> USB CAMERA: USB CAMERA (usb-0000:00:14.0-4):
+2025-08-27 14:15:23,204 - __main__ - INFO - Found camera: /dev/video2 -> Integrated_Webcam_HD: Integrate (usb-0000:00:14.0-6):
+2025-08-27 14:15:23,204 - __main__ - INFO - Found camera: /dev/video3 -> Integrated_Webcam_HD: Integrate (usb-0000:00:14.0-6):
+2025-08-27 14:15:23,205 - __main__ - INFO - Detected 6 cameras: [0, 1, 4, 5, 2, 3]
+2025-08-27 14:15:23,205 - __main__ - INFO - Initializing cameras...
+2025-08-27 14:15:23,205 - __main__ - INFO - Initializing camera /dev/video0...
+2025-08-27 14:15:23,578 - __main__ - INFO - Camera 0 initialized successfully - (600, 800, 3)
+2025-08-27 14:15:23,578 - __main__ - INFO - Initializing camera /dev/video1...
+2025-08-27 14:15:23,581 - __main__ - ERROR - Camera 1: Could not open with any backend
+2025-08-27 14:15:23,581 - __main__ - ERROR - Camera 1 initialization failed
+2025-08-27 14:15:23,581 - __main__ - INFO - Initializing camera /dev/video4...
+2025-08-27 14:15:23,952 - __main__ - INFO - Camera 4 initialized successfully - (600, 800, 3)
+2025-08-27 14:15:23,953 - __main__ - INFO - Initializing camera /dev/video5...
+2025-08-27 14:15:23,954 - __main__ - ERROR - Camera 5: Could not open with any backend
+2025-08-27 14:15:23,954 - __main__ - ERROR - Camera 5 initialization failed
+2025-08-27 14:15:23,954 - __main__ - INFO - Initializing camera /dev/video2...
+2025-08-27 14:15:24,142 - __main__ - INFO - Camera 2 initialized successfully - (480, 848, 3)
+2025-08-27 14:15:24,142 - __main__ - INFO - Initializing camera /dev/video3...
+2025-08-27 14:15:24,143 - __main__ - ERROR - Camera 3: Could not open with any backend
+2025-08-27 14:15:24,143 - __main__ - ERROR - Camera 3 initialization failed
+2025-08-27 14:15:24,143 - __main__ - INFO - Successfully initialized 3 cameras: [0, 4, 2]
+2025-08-27 14:15:24,144 - __main__ - INFO - Capture thread started for camera 0
+2025-08-27 14:15:24,144 - __main__ - INFO - Capture thread started for camera 4
+2025-08-27 14:15:24,144 - __main__ - INFO - Capture thread started for camera 2
+2025-08-27 14:15:35,276 - __main__ - INFO - Selecting product...
+2025-08-27 14:15:39,464 - __main__ - INFO - Recording cancelled by user
+2025-08-27 14:15:52,056 - __main__ - INFO - Exit requested by user
+2025-08-27 14:15:52,056 - __main__ - INFO - Cleaning up resources...
+2025-08-27 14:15:52,088 - __main__ - INFO - All capture threads stopped
+2025-08-27 14:15:52,117 - __main__ - INFO - Camera resources cleaned up
+2025-08-27 14:15:52,120 - __main__ - INFO - Cleanup completed
