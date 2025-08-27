@@ -320,9 +320,9 @@ class MultiCameraRecorder:
         self.current_product = None
         
         # Configuración de video
-        self.fps = 30
-        self.width = 640
-        self.height = 480
+        self.fps = 60
+        self.width = 800
+        self.height = 600
         self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         
         # FIXED: Variables para manejo dinámico de ventana
@@ -348,64 +348,77 @@ class MultiCameraRecorder:
         self.product_manager = ProductManager(clips_base_dir=self.base_clips_dir)
     
     def detect_available_cameras(self, max_cameras=10):
-        """Detecta automáticamente las cámaras disponibles en el sistema"""
+        """Detecta automáticamente las cámaras disponibles usando v4l2 primero"""
         print("🔍 Detectando cámaras disponibles...")
-        available_cameras = []
-        
-        # Método 1: Buscar usando v4l2 (Linux)
+        available_cameras = {}
+
+        # Método 1: Buscar usando v4l2-ctl
         try:
             import subprocess
-            result = subprocess.run(['v4l2-ctl', '--list-devices'], 
-                                  capture_output=True, text=True, timeout=5)
+            result = subprocess.run(
+                ['v4l2-ctl', '--list-devices'],
+                capture_output=True, text=True, timeout=5
+            )
             if result.returncode == 0:
                 print("📋 Información de v4l2-ctl:")
-                lines = result.stdout.split('\n')
+                lines = result.stdout.splitlines()
+                current_device_name = None
+
                 for line in lines:
-                    if '/dev/video' in line:
-                        # Extraer número de dispositivo
-                        device_num = line.strip().split('/dev/video')[1].split(':')[0]
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    # Si la línea no es un path → es la descripción del dispositivo
+                    if not line.startswith("/dev/video"):
+                        current_device_name = line
+                        continue
+
+                    # Si es un path de dispositivo
+                    if line.startswith("/dev/video"):
                         try:
-                            device_id = int(device_num)
-                            if device_id not in available_cameras:
-                                available_cameras.append(device_id)
-                                print(f"  📷 Encontrada: /dev/video{device_id}")
+                            device_id = int(line.replace("/dev/video", ""))
+                            available_cameras[line] = {
+                                "id": device_id,
+                                "name": current_device_name
+                            }
+                            print(f"  📷 {line} → {current_device_name}")
                         except ValueError:
                             pass
-        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-            print(f"⚠️  v4l2-ctl no disponible o error: {e}")
-        
-        # Método 2: Probar dispositivos secuencialmente (fallback)
+        except Exception as e:
+            print(f"⚠️ Error con v4l2-ctl: {e}")
+
+        # Método 2: fallback secuencial
         if not available_cameras:
             print("🔄 Probando dispositivos secuencialmente...")
             for device_id in range(max_cameras):
                 if self.test_camera_quick(device_id):
-                    available_cameras.append(device_id)
-                    print(f"  ✅ /dev/video{device_id} disponible")
-        
-        # Método 3: Buscar archivos de dispositivo directamente
+                    path = f"/dev/video{device_id}"
+                    available_cameras[path] = {"id": device_id, "name": "Unknown"}
+                    print(f"  ✅ {path} disponible")
+
+        # Método 3: buscar archivos directos
         if not available_cameras:
             print("📁 Buscando archivos /dev/video*...")
             import glob
-            video_devices = glob.glob('/dev/video*')
-            for device_path in sorted(video_devices):
+            for path in sorted(glob.glob("/dev/video*")):
                 try:
-                    device_id = int(device_path.replace('/dev/video', ''))
+                    device_id = int(path.replace("/dev/video", ""))
                     if self.test_camera_quick(device_id):
-                        available_cameras.append(device_id)
-                        print(f"  ✅ {device_path} disponible")
+                        available_cameras[path] = {"id": device_id, "name": "Unknown"}
+                        print(f"  ✅ {path} disponible")
                 except ValueError:
                     pass
-        
-        available_cameras.sort()
+
         self.camera_devices = available_cameras
-        
+
         if available_cameras:
-            print(f"🎉 {len(available_cameras)} cámaras detectadas: {available_cameras}")
+            print(f"🎉 {len(available_cameras)} cámaras detectadas")
         else:
             print("❌ No se detectaron cámaras disponibles")
-            
+
         return available_cameras
-    
+
     def test_camera_quick(self, device_id, timeout=3):
         """Prueba rápida si una cámara está disponible"""
         import signal
@@ -728,8 +741,8 @@ class MultiCameraRecorder:
         # FIXED: Asegurar dimensiones mínimas pero escalables
         min_cam_width = 160
         min_cam_height = 120
-        cam_width = max(cam_width, min_cam_width)
-        cam_height = max(cam_height, min_cam_height)
+        cam_width = max(self.max_window_width, cam_width, min_cam_width)
+        cam_height = max(self.max_window_height, cam_height, min_cam_height)
         
         # FIXED: Mantener aspect ratio si es posible
         aspect_ratio = 4/3  # Ratio típico de cámaras
