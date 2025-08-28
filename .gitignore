@@ -1,2 +1,31 @@
-clips
-frames
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+clips/
+frames/
+products.json
+*.log
+smart_cooler.log
+
+# Temporary files
+*.tmp
+*.bak
