@@ -34,6 +34,7 @@ class MultiCameraRecorder:
         
         # State
         self.running = True
+        self.window_exists = False
         
         # Ensure clips directory exists
         self.clips_base_dir.mkdir(exist_ok=True)
@@ -54,26 +55,40 @@ class MultiCameraRecorder:
         self.camera_manager.start_capture_threads()
         return True
     
+    def is_window_open(self, window_name: str) -> bool:
+        """Check if the window is still open using multiple methods"""
+        try:
+            prop = cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE)
+            if prop < 1:
+                return False
+            
+            prop2 = cv2.getWindowProperty(window_name, cv2.WND_PROP_ASPECT_RATIO)
+            if prop2 < 0:
+                return False
+                
+            return True
+            
+        except cv2.error:
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking window status: {e}")
+            return False
+    
     def force_camera_detection(self, window_name: str) -> str:
         """Force new camera detection and return updated window name"""
         logger.info("Forcing camera detection...")
         old_camera_count = len(self.camera_manager.cameras)
         
-        # Clean up current cameras
         self.camera_manager.cleanup()
         time.sleep(1)
         
-        # Re-initialize
         if self.initialize_system():
             new_camera_count = len(self.camera_manager.cameras)
             logger.info("Camera detection completed")
             
             if new_camera_count != old_camera_count:
-                # Update window name if camera count changed
                 new_window_name = f'Smart Cooler - {new_camera_count} Cameras (Auto-detect)'
-                cv2.destroyWindow(window_name)
-                cv2.namedWindow(new_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-                cv2.resizeWindow(new_window_name, self.window_config.width, self.window_config.height)
+                self.recreate_window(window_name, new_window_name)
                 return new_window_name
         else:
             logger.error("Failed to re-initialize cameras")
@@ -107,14 +122,24 @@ class MultiCameraRecorder:
             
             if new_camera_count != old_camera_count:
                 new_window_name = f'Smart Cooler - {new_camera_count} Cameras (Auto-detect)'
-                cv2.destroyWindow(window_name)
-                cv2.namedWindow(new_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-                cv2.resizeWindow(new_window_name, self.window_config.width, self.window_config.height)
+                self.recreate_window(window_name, new_window_name)
                 return new_window_name
         else:
             logger.error("Failed to restart cameras")
         
         return window_name
+    
+    def recreate_window(self, old_window_name: str, new_window_name: str) -> None:
+        """Safely recreate window with new name"""
+        try:
+            cv2.destroyWindow(old_window_name)
+            time.sleep(0.1)
+        except:
+            pass
+        
+        cv2.namedWindow(new_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+        cv2.resizeWindow(new_window_name, self.window_config.width, self.window_config.height)
+        self.window_exists = True
     
     def print_startup_info(self) -> None:
         """Print startup information"""
@@ -136,7 +161,8 @@ class MultiCameraRecorder:
             print(f"Available products: {len(self.product_manager.products)}")
         print("Automatic versioning: product_v1, product_v2, etc.")
         print("READY - Press SPACE to select product and record")
-        print("TIP: Resize window by dragging corners\n")
+        print("TIP: Resize window by dragging corners or close with X")
+        print("="*70)
     
     def handle_key_input(self, key: int, window_name: str) -> Tuple[bool, str]:
         """Handle keyboard input and return (continue_running, window_name)"""
@@ -175,14 +201,21 @@ class MultiCameraRecorder:
         
         # Setup window
         window_name = f'Smart Cooler - {len(self.camera_manager.cameras)} Cameras (Auto-detect)'
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
         cv2.resizeWindow(window_name, self.window_config.width, self.window_config.height)
+        self.window_exists = True
         time.sleep(0.5)  # Let window initialize
         
         self.print_startup_info()
         
         try:
-            while self.running:
+            while self.running and self.window_exists:
+                # First check if window is still open
+                if not self.is_window_open(window_name):
+                    logger.info("Window closed by user (X button)")
+                    self.window_exists = False
+                    break
+                
                 # Update video recording with current frames
                 self.video_recorder.write_frames()
                 
@@ -195,26 +228,28 @@ class MultiCameraRecorder:
                 )
                 
                 if grid is not None:
-                    cv2.imshow(window_name, grid)
-                
-                # Check if window was closed
-                try:
-                    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-                        logger.info("Window closed by user")
+                    try:
+                        cv2.imshow(window_name, grid)
+                    except cv2.error as e:
+                        logger.info(f"Error displaying frame (window likely closed): {e}")
+                        self.window_exists = False
                         break
-                except cv2.error:
-                    logger.info("Window no longer exists")
-                    break
                 
-                # Handle keyboard input
-                key = cv2.waitKey(1) & 0xFF
+                # Handle keyboard input with shorter timeout for better responsiveness
+                key = cv2.waitKey(30) & 0xFF
                 if key != 255:  # Key was pressed
                     continue_running, window_name = self.handle_key_input(key, window_name)
                     if not continue_running:
                         break
+                
+                # Additional check after waitKey to catch window close events
+                if not self.is_window_open(window_name):
+                    logger.info("Window closed during waitKey")
+                    self.window_exists = False
+                    break
         
         except KeyboardInterrupt:
-            logger.info("Interrupted by user")
+            logger.info("Interrupted by user (Ctrl+C)")
         
         except Exception as e:
             logger.error(f"Unexpected error in main loop: {e}")
@@ -227,6 +262,7 @@ class MultiCameraRecorder:
         logger.info("Cleaning up resources...")
         
         self.running = False
+        self.window_exists = False
         
         # Stop recording if active
         self.video_recorder.cleanup()
@@ -235,7 +271,13 @@ class MultiCameraRecorder:
         self.camera_manager.cleanup()
         
         # Close all OpenCV windows
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+            # Force window cleanup with multiple calls
+            for _ in range(5):
+                cv2.waitKey(1)
+        except:
+            pass
         
         logger.info("Cleanup completed")
 

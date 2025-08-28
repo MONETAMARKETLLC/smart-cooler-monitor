@@ -17,9 +17,9 @@ class CameraInfo:
 @dataclass
 class VideoConfig:
     """Video configuration settings"""
-    fps: int = 60
-    width: int = 800
-    height: int = 600
+    fps: int = 30
+    width: int = 640
+    height: int = 480
     fourcc: int = cv2.VideoWriter_fourcc(*'mp4v')
 
 
