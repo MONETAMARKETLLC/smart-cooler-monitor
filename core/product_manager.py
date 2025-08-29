@@ -1,11 +1,14 @@
 import json
 import re
 import tkinter as tk
-from utils.logger import logger
 from typing import  Optional, List
 from pathlib import Path
 from difflib import get_close_matches
 from tkinter import messagebox, simpledialog
+
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class ProductManager:
     """Manages product database and versioning"""
@@ -206,11 +209,18 @@ class ProductManager:
         )
         
         if response is True:
+            logger.info("User chose to see product options")
             choice = self._choose_from_suggestions(similar, base_product)
-            if choice:
+            logger.info(f"_choose_from_suggestions returned: '{choice}'")
+            
+            # CAMBIO 3: Mejorar la validación aquí también
+            if choice and choice.strip():  # Validar que no sea None y no esté vacío
+                logger.info(f"Valid choice received: '{choice}'")
                 versioned_choice = self.get_next_version(choice)
                 existing_versions = self.get_existing_versions(choice)
                 version_info = f"Existing versions: {', '.join(existing_versions)}" if existing_versions else "First recording"
+                
+                logger.info(f"Next version will be: '{versioned_choice}'")
                 
                 confirm = messagebox.askyesno(
                     "Version Confirmation",
@@ -218,7 +228,16 @@ class ProductManager:
                     f"New version will be: {versioned_choice}\n\nContinue?"
                 )
                 
+                if confirm:
+                    logger.info(f"User confirmed. Final versioned choice: '{versioned_choice}'")
+                else:
+                    logger.info("User cancelled version confirmation")
+                
                 return versioned_choice if confirm else None
+            else:
+                # Si no se seleccionó nada válido, regresar None para cancelar
+                logger.info(f"Invalid or empty choice: '{choice}' - returning None")
+                return None
         elif response is False:
             new_versioned_name = f"{base_product}_v1"
             self.add_product(base_product)
@@ -228,6 +247,10 @@ class ProductManager:
     
     def _choose_from_suggestions(self, suggestions: List[str], original_query: str) -> Optional[str]:
         """Allow choosing from a list of suggestions"""
+        logger.info(f"_choose_from_suggestions called with:")
+        logger.info(f"  original_query: '{original_query}'")
+        logger.info(f"  suggestions: {suggestions}")
+        
         root = tk.Tk()
         root.title("Select Product")
         root.geometry("400x300")
@@ -238,43 +261,74 @@ class ProductManager:
                 font=("Arial", 12, "bold")).pack(pady=10)
         
         selection_var = tk.StringVar()
+        if suggestions:
+            selection_var.set(suggestions[0])
         
         frame = tk.Frame(root)
         frame.pack(pady=10, padx=20, fill='both', expand=True)
         
-        for product in suggestions:
+        # Función para logear cuando se hace clic en un radio button
+        def on_radio_click(product_name):
+            logger.info(f"Radio button clicked: {product_name}")
+            logger.info(f"Current selection_var value before: {selection_var.get()}")
+            selection_var.set(product_name)
+            logger.info(f"Current selection_var value after: {selection_var.get()}")
+        
+        # Crear los radio buttons y marcar el primero como seleccionado por defecto
+        for i, product in enumerate(suggestions):
             existing_versions = self.get_existing_versions(product)
             version_text = f" ({', '.join(existing_versions)})" if existing_versions else " (new)"
             display_text = f"{product}{version_text}"
             
-            tk.Radiobutton(
+            rb = tk.Radiobutton(
                 frame,
                 text=display_text,
                 variable=selection_var,
                 value=product,
-                font=("Arial", 10)
-            ).pack(anchor='w', pady=2)
+                font=("Arial", 10),
+                command=lambda p=product: on_radio_click(p)
+            )
+            rb.pack(anchor='w', pady=2)
+            
+            # Si es el primer elemento y no hay selección previa, seleccionarlo visualmente
+            if i == 0:
+                rb.select()
+                logger.info(f"Default selection set to: {product}")
         
         def on_select():
             nonlocal selected_product
-            selected_product = selection_var.get()
-            root.quit()
+            choice = selection_var.get()
+            logger.info(f"Select button clicked")
+            logger.info(f"Current selection_var value: '{choice}'")
+            logger.info(f"Available suggestions: {suggestions}")
+            logger.info(f"Choice in suggestions: {choice in suggestions}")
+            
+            # CAMBIO 2: Validar que se haya seleccionado algo
+            if choice and choice in suggestions:
+                selected_product = choice
+                logger.info(f"Product selected successfully: '{selected_product}'")
+                root.quit()
+            else:
+                logger.warning(f"Invalid selection - choice: '{choice}', suggestions: {suggestions}")
+                messagebox.showwarning("Warning", "Please select a product first")
         
         def on_cancel():
             nonlocal selected_product
             selected_product = None
+            logger.info("Cancel button clicked - selection cancelled")
             root.quit()
         
         btn_frame = tk.Frame(root)
         btn_frame.pack(pady=10)
         
         tk.Button(btn_frame, text="Select", command=on_select,
-                 bg="#4CAF50", fg="white", font=("Arial", 10, "bold")).pack(side='left', padx=5)
+                bg="#4CAF50", fg="white", font=("Arial", 10, "bold")).pack(side='left', padx=5)
         tk.Button(btn_frame, text="Cancel", command=on_cancel,
-                 bg="#f44336", fg="white", font=("Arial", 10, "bold")).pack(side='left', padx=5)
+                bg="#f44336", fg="white", font=("Arial", 10, "bold")).pack(side='left', padx=5)
         
         try:
             root.mainloop()
+            logger.info(f"Dialog closed. Final selected_product: '{selected_product}'")
             return selected_product
         finally:
             root.destroy()

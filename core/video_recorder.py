@@ -1,12 +1,15 @@
 import cv2
 import time
 from pathlib import Path
-from utils.logger import logger
 from config.settings import VideoConfig
 from typing import Dict, Optional
 from core.camera_manager import CameraManager
 from core.product_manager import ProductManager
 from datetime import datetime
+
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class VideoRecorder:
     """Handles video recording operations"""
