@@ -5,11 +5,14 @@ import glob
 import threading
 import time
 import numpy as np
-from utils.logger import logger
 from utils.exceptions import CameraError
 from core.camera_detector import CameraDetector
 from config.settings import CameraInfo, VideoConfig
 from typing import Dict, Optional, List, Tuple
+
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class CameraManager:
     """Manages camera operations and capture threads"""

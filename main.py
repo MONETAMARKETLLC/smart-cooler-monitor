@@ -4,13 +4,16 @@ import numpy as np
 from pathlib import Path
 from typing import Tuple
 
-from utils.logger import logger
 from config.settings import WindowConfig, VideoConfig
 from core.product_manager import ProductManager
 from core.video_recorder import VideoRecorder
 from core.display_manager import DisplayManager
 from core.camera_detector import CameraDetector
 from core.camera_manager import CameraManager
+
+from utils.logger import setup_logging, get_logger
+logger_setup = setup_logging() 
+logger = get_logger(__name__)
 
 class MultiCameraRecorder:
     """Main application class that orchestrates all components"""

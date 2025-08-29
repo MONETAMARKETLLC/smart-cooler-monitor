@@ -1,11 +1,14 @@
 import json
 import re
 import tkinter as tk
-from utils.logger import logger
 from typing import  Optional, List
 from pathlib import Path
 from difflib import get_close_matches
 from tkinter import messagebox, simpledialog
+
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class ProductManager:
     """Manages product database and versioning"""

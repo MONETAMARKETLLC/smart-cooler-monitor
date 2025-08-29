@@ -1,11 +1,13 @@
 import cv2
 import time
 import numpy as np
-from utils.logger import logger
 from config.settings import WindowConfig
 from typing import Optional, Tuple, List
 from core.camera_manager import CameraManager
 
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class DisplayManager:
 

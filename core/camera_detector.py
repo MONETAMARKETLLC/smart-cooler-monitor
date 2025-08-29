@@ -2,10 +2,12 @@ import cv2
 import signal
 import subprocess
 import glob
-from utils.logger import logger
 from config.settings import CameraInfo
 from typing import Dict, Optional
 
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class CameraDetector:
     """Handles camera detection and initialization"""
