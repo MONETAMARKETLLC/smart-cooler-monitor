@@ -11,6 +11,8 @@ pillow = "^10.0.0"
 opencv-python = "^4.8.0"
 numpy = "^1.24.0"
 tk = "^0.1.0"
+ipykernel = "^6.30.1"
+ultralytics = "^8.3.193"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
