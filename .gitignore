@@ -29,3 +29,7 @@ smart_cooler.log
 # Temporary files
 *.tmp
 *.bak
+
+videos/
+
+*.pt
